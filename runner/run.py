@@ -434,6 +434,13 @@ def main(argv=None) -> int:
     ap.add_argument("--report", default=None)
     ap.add_argument("--token", default=os.environ.get("CONFORMANCE_TOKEN", ""))
     ap.add_argument("--schemas", default=None, help="schema 目录，默认取 runner 的同级 schema/")
+    ap.add_argument(
+        "--case",
+        action="append",
+        default=None,
+        help="只跑 id 含这些子串的用例（可重复）。用于把一条用例单独拉出来查："
+        "一整套跑下来时，报错本身往往不足以定位到是哪条路径出的问题。",
+    )
     args = ap.parse_args(argv)
 
     here = Path(__file__).resolve().parent
@@ -454,6 +461,8 @@ def main(argv=None) -> int:
     except (OSError, json.JSONDecodeError) as e:
         print("[一致性套件] 读不到 schema：" + str(e), file=sys.stderr)
         return 2
+    # 校验**全部**用例（含被 --case 过滤掉的那些）：过滤是为了调试，不该顺带削弱门禁。
+    all_cases = cases
     problems += ["fixture: " + e for e in sch.validate(fixture, fsch)]
     for c in cases:
         problems += [str(c.get("id", "<无 id>")) + ": " + e for e in sch.validate(c, csch)]
@@ -474,6 +483,19 @@ def main(argv=None) -> int:
         return 2
 
     fixture["_base_url"] = args.base_url
+
+    if args.case:
+        wanted = args.case
+        cases = [c for c in all_cases if any(w in c.get("id", "") for w in wanted)]
+        if not cases:
+            print(
+                "[一致性套件] --case 没有匹配到任何用例：" + repr(wanted),
+                file=sys.stderr,
+            )
+            return 2
+        print("[一致性套件] --case 过滤后只跑 " + str(len(cases)) + " 条："
+              + ", ".join(c.get("id", "?") for c in cases))
+
     results = []
     for case in cases:
         ctx = inv.Ctx(fixture=fixture, case=case)
