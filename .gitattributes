@@ -1,0 +1,8 @@
+# 本仓库是数据仓库（规范快照 / 用例 / schema / runner），内容一律 LF。
+#
+# 为什么需要显式声明：Windows 上常见的全局 `core.autocrlf=true` 会在 checkout 时写成
+# CRLF。这个仓库里跑的是 Python runner 与 JSON 用例 —— 行尾翻转会让**每个文件的每一行**
+# 都变成 diff，把真实的契约变更淹没掉；而契约仓库的 diff 正是评审要看的东西。
+#
+# 两个上游仓库早就有同样的声明；这里补上，让三个仓库行为一致。
+* text=auto eol=lf
