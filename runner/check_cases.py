@@ -27,6 +27,15 @@ slots_used: set[str] = set()
 endpoints_used: set[str] = set()
 
 
+# 与 run.py 的 `_COND` 一致：路径（允许 `capability:` 前缀）+ `==` + 字面量。
+# **与 `run.py` 的 `_COND` 逐字一致**（路径字符集不含冒号）—— 我第一版多写了一个冒号，
+# 于是把 `capability:authProbe == false` 判成合法，负向测试当场戳穿。校验器与被校验的
+# 解析器用两套不同的语法，比不校验更糟：它给出「已检查」的假象。
+#
+# 能力门控请写进 `requires`（`"capability:X"`），不要写进条件表达式。
+COND_RE = re.compile(r"^\s*([A-Za-z0-9_.]+)\s*==\s*(true|false|null|-?[0-9]+|\"[^\"]*\")\s*$")
+
+
 def main() -> int:
     csch = json.loads((ROOT / "schema/case.schema.json").read_text(encoding="utf-8"))
     fsch = json.loads((ROOT / "schema/fixture.schema.json").read_text(encoding="utf-8"))
@@ -67,6 +76,26 @@ def main() -> int:
             if kind == "slot":
                 slots_used.add(name)
         for op in case.get("ops", []):
+            # `skip_if` 的语法此前**没人校验** —— 于是 `"capability:authProbe == false"`
+            # （`capability:` 不是该条件语法的一部分）一路滑到运行时，由执行器以退出码 2
+            # 报「环境或用例非法」。这道静态校验把同一件事提前到 PR 阶段 —— 那里的报错
+            # 更便宜。语法与 `run.py` 的 `_COND` 保持一致。
+            for expr in [op.get("skip_if")] + list((op.get("loop_until") or "").split(" or ")):
+                if expr and not COND_RE.match(expr):
+                    problems.append(
+                        str(rel)
+                        + ": skip_if/loop_until 只支持 `a.b == 字面量`，实际 "
+                        + repr(expr)
+                    )
+            # `sse_expect` **不能**带 `as`（见 case.schema.json），所以一旦 sse_open 给流起了名，
+            # 中间那条 expect 就永远够不到它 —— schema 本身不自洽。这条检查把该矛盾提前暴露：
+            # 改为使用默认流名（不写 `as`）即可。
+            if op.get("sse_open", {}).get("as"):
+                if any(later.get("sse_expect") for later in case.get("ops", [])):
+                    problems.append(
+                        str(rel)
+                        + ": sse_open 命名了流，但 sse_expect 无法寻址（它不接受 as）——改用默认流名"
+                    )
             for name in op.get("assert", []):
                 asserts_used.add(name)
             # 断言也可以挂在 sse_expect 里（等事件到达后再判）；漏掉它会让

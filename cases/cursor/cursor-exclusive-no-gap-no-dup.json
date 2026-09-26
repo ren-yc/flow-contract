@@ -16,7 +16,10 @@
       },
       "assert": [
         "cursor_exclusive_no_gap_no_dup"
-      ]
+      ],
+      "save": {
+        "s1": "sync.nextSince"
+      }
     },
     {
       "loop_until": "sync.hasMore == false",

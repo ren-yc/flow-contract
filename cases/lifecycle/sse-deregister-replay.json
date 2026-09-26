@@ -8,8 +8,7 @@
   "ops": [
     {
       "sse_open": {
-        "endpoint": "push",
-        "as": "s"
+        "endpoint": "push"
       }
     },
     {
@@ -25,9 +24,7 @@
       }
     },
     {
-      "sse_close": {
-        "as": "s"
-      }
+      "sse_close": {}
     }
   ]
 }

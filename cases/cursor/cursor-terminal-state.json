@@ -7,6 +7,18 @@
   "note": "排空后 hasMore 为假、nextOffset 归零",
   "ops": [
     {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "3"
+        }
+      },
+      "save": {
+        "s1": "sync.nextSince"
+      }
+    },
+    {
       "loop_until": "sync.hasMore == false",
       "max": 80,
       "req": {

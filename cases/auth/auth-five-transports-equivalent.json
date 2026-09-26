@@ -1,11 +1,11 @@
 {
   "id": "auth-five-transports-equivalent",
   "group": "auth",
+  "requires": [
+    "capability:authProbe"
+  ],
   "note": "五种鉴权传输方式等价；夹具没做探测时跳过",
   "ops": [
-    {
-      "skip_if": "capability:authProbe == false"
-    },
     {
       "assert": [
         "auth_transports_matrix"
