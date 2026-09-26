@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ren-yc/flow-contract/schema/case.schema.json",
+  "title": "契约断言用例",
+  "description": "用例是**数据，不是代码**：只做「选哪个不变量 + 绑哪个变量 + 必要时调哪个 harness action」。判断逻辑一律在 runner 的不变量注册表里。",
+  "type": "object",
+  "required": [
+    "id",
+    "group",
+    "ops"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "全库唯一；用它定位失败，所以必须稳定、可搜索"
+    },
+    "group": {
+      "enum": [
+        "envelope",
+        "cursor",
+        "discovery",
+        "nails",
+        "auth",
+        "lifecycle"
+      ],
+      "description": "与 cases/ 下的子目录同名"
+    },
+    "requires": {
+      "type": "array",
+      "description": "前置条件；不满足时整条用例 skip（**唯一的 skip 入口**，skip 必须打印出来）",
+      "items": {
+        "type": "string",
+        "pattern": "^(capability|slot|endpoint):[A-Za-z0-9_]+$"
+      }
+    },
+    "note": {
+      "type": "string",
+      "description": "这条用例在守什么；只写「为什么」，不写编号"
+    },
+    "ops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/op"
+      }
+    }
+  },
+  "$defs": {
+    "varRef": {
+      "type": "string",
+      "pattern": "^(\\{[a-zA-Z0-9_.]+\\}|[^{}]+)$",
+      "description": "字面量，或 {var.path} 变量引用"
+    },
+    "req": {
+      "type": "object",
+      "description": "发一次 HTTP 请求。方法以内联键给出（如 \"GET\": \"{endpoints.pull}\"），恰好一个。",
+      "required": [
+        "slot"
+      ],
+      "properties": {
+        "slot": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+$",
+          "description": "逻辑槽位名；夹具把它绑定到真实平台 id"
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/varRef"
+          }
+        },
+        "body": {
+          "type": "object"
+        }
+      },
+      "patternProperties": {
+        "^(GET|POST|PUT|DELETE|PATCH)$": {
+          "type": "string",
+          "pattern": "^\\{endpoints\\.[a-z0-9_]+\\}$"
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "GET"
+          ]
+        },
+        {
+          "required": [
+            "POST"
+          ]
+        },
+        {
+          "required": [
+            "PUT"
+          ]
+        },
+        {
+          "required": [
+            "DELETE"
+          ]
+        },
+        {
+          "required": [
+            "PATCH"
+          ]
+        }
+      ]
+    },
+    "op": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "req": {
+          "$ref": "#/$defs/req"
+        },
+        "save": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "把响应里的 JSON 路径存进变量，如 { \"s1\": \"sync.nextSince\" }"
+        },
+        "assert": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "点名内置不变量；名字必须在注册表里"
+        },
+        "loop_until": {
+          "type": "string",
+          "description": "重复内嵌 req 直到条件成立或到 max（用于翻页排空）"
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "loop_until 的次数上限；必须给，否则死循环"
+        },
+        "skip_if": {
+          "type": "string",
+          "description": "条件成立时跳过本条用例"
+        },
+        "call": {
+          "type": "string",
+          "pattern": "^harness\\.[a-z0-9_]+$",
+          "description": "调用具名 harness action；词表固定，见 fixture.schema.json"
+        },
+        "sse_open": {
+          "type": "object",
+          "required": [
+            "endpoint"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+$",
+              "description": "逻辑端点名，通常是 push"
+            },
+            "as": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+$",
+              "description": "流句柄的变量名，默认 stream"
+            }
+          }
+        },
+        "sse_expect": {
+          "type": "object",
+          "required": [
+            "event",
+            "within_s"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "event": {
+              "type": "string",
+              "description": "要等待的 event 名，如 message.new"
+            },
+            "within_s": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "超时秒数；超时即失败（不静默跳过）"
+            },
+            "lastEventId": {
+              "$ref": "#/$defs/varRef",
+              "description": "带此值重连，用于验证断线重放"
+            },
+            "assert": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$"
+              }
+            }
+          }
+        },
+        "sse_close": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+$"
+            }
+          }
+        },
+        "args": {
+          "type": "object",
+          "description": "call 的参数（如 append_message 的 target 槽位）；只有 call 用得到"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "req"
+          ]
+        },
+        {
+          "required": [
+            "assert"
+          ]
+        },
+        {
+          "required": [
+            "loop_until"
+          ]
+        },
+        {
+          "required": [
+            "skip_if"
+          ]
+        },
+        {
+          "required": [
+            "call"
+          ]
+        },
+        {
+          "required": [
+            "save"
+          ]
+        },
+        {
+          "required": [
+            "sse_open"
+          ]
+        },
+        {
+          "required": [
+            "sse_expect"
+          ]
+        },
+        {
+          "required": [
+            "sse_close"
+          ]
+        }
+      ],
+      "description": "9 个 op：req / save / assert / loop_until / skip_if / call / sse_open / sse_expect / sse_close。判断逻辑一律在 runner 的注册表里，因此用例始终是数据。"
+    }
+  }
+}

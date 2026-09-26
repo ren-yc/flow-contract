@@ -37,3 +37,8 @@ jobs:
 
       - name: privacy gate (tiered by file type)
         run: python3 scripts/check_privacy.py --tree
+
+      # 不变量注册表是「判断逻辑的唯一出处」——它自己写错了没有任何东西会拦。
+      # 自测对每条不变量成对验证：该过的过、该拦的拦（只验前者等于没验）。
+      - name: runner self-test (invariants)
+        run: python3 runner/selftest.py

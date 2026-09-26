@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ren-yc/flow-contract/schema/fixture.schema.json",
+  "title": "夹具契约",
+  "description": "由各上游仓库的 harness 生成，**绝不入库**（含真实平台标识）。用例只引用逻辑槽位名，夹具负责把它们绑定到具体 id。",
+  "type": "object",
+  "required": [
+    "contractVersion",
+    "platform",
+    "endpoints",
+    "slots",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "必须等于 VERSION / 所 pin 的 tag（去掉前缀 v）"
+    },
+    "platform": {
+      "enum": [
+        "wechat",
+        "qq"
+      ],
+      "description": "决定结构/值域差异按哪一端参数化"
+    },
+    "generatedBy": {
+      "type": "string"
+    },
+    "endpoints": {
+      "type": "object",
+      "description": "逻辑端点名 → 该仓库的实际路径。用例只写逻辑名，因此同一份用例能跑两个仓库、也能跑 /chatlab 面。",
+      "required": [
+        "health",
+        "accounts",
+        "sessions",
+        "pull",
+        "messages",
+        "contacts",
+        "push"
+      ],
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^/",
+        "description": "以 / 开头的路径。**需要会话 id 的端点用 {id} 占位**（如 /api/v1/sessions/{id}/messages），执行器在用例给了 slot 时替换它。额外端点（例如 harness 控制端点）也可以在这里声明。"
+      }
+    },
+    "slots": {
+      "type": "object",
+      "description": "逻辑槽位名 → 该平台上的具体会话。**共享用例里因此不出现任何真实 id。**",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "expect": {
+            "type": "object",
+            "description": "该槽位的期望；断言据此取上/下界，而不是硬编码数值"
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "「能力存在性差异」的机器可读载体；缺失的能力由用例 skip 而非 fail。",
+      "required": [
+        "mediaById",
+        "sns",
+        "memberCount",
+        "roles",
+        "sse"
+      ],
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    }
+  }
+}
