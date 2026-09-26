@@ -191,11 +191,50 @@ def sse_expect(ctx, op):
     if handle not in ctx.streams:
         raise SetupError("还没有打开流 " + repr(handle) + "：sse_expect 之前必须先 sse_open")
     _, resp = ctx.streams[handle]
-    name, data = _read_event(resp, float(spec["within_s"]))
-    if name is None:
-        raise SetupError("在 " + str(spec["within_s"]) + " 秒内没有收到事件 " + repr(spec["event"]))
-    if name != spec["event"]:
-        raise SetupError("期望事件 " + repr(spec["event"]) + "，实际 " + repr(name))
+    # **等待直到**期望的事件，而不是「下一帧必须是它」。
+    #
+    # 为什么：规范把 SSE 定义为**通知通道** ——「ChatLab 不假设 SSE 事件可靠送达」，客户端
+    # 按事件类型过滤（它只对 `message.new` 有反应，其余帧直接忽略）。数据源在连接建立时
+    # 发一条基线帧（本项目的实现发的是 `ready`）是完全正常的，而「下一帧必须是 X」会把这条
+    # 合规的基线判成失败 —— 两个上游仓库都卡在这里，正是这个原因。
+    #
+    # `within_s` 的语义不变：它是**总的等待上限**，不是单帧的读超时。
+    #
+    # 跳过的事件名会记下来并写进超时报错：否则「跳过」会退化成「静默吞掉任何东西」，
+    # 一个疯狂发帧的数据源和一个正常的数据源在报告里就分不出来了。
+    import time
+    deadline = time.time() + float(spec["within_s"])
+    skipped: list[str] = []
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            raise SetupError(
+                "在 "
+                + str(spec["within_s"])
+                + " 秒内没有收到事件 "
+                + repr(spec["event"])
+                + "（期间跳过 "
+                + str(len(skipped))
+                + " 帧："
+                + repr(skipped[:10])
+                + "）"
+            )
+        name, data = _read_event(resp, remaining)
+        if name is None:
+            raise SetupError(
+                "在 "
+                + str(spec["within_s"])
+                + " 秒内没有收到事件 "
+                + repr(spec["event"])
+                + "（期间跳过 "
+                + str(len(skipped))
+                + " 帧："
+                + repr(skipped[:10])
+                + "）"
+            )
+        if name == spec["event"]:
+            break
+        skipped.append(name)
     try:
         ctx.body = json.loads(data) if data else None
     except json.JSONDecodeError:
@@ -270,7 +309,7 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 _harness_call(ctx, op, token)
                 continue
             if "loop_until" in op:
-                _loop(ctx, op, token, result)
+                _loop(ctx, op, token, result, case)
                 continue
             if "req" in op:
                 status, body = request(ctx, op, token)
@@ -278,18 +317,7 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 ctx.pages.append(_page_summary(body))
                 ctx.variables["request_limit"] = (op["req"].get("query") or {}).get("limit")
                 ctx.variables["request_since"] = (op["req"].get("query") or {}).get("since")
-            if "save" in op:
-                for var, path in op["save"].items():
-                    # 哨兵 $ids：存本页的 platformMessageId 列表。
-                    # 需要它的原因：跨页对比要有**显式基准**，而「把第一页当全量」
-                    # 与「页间不得重复」是互相矛盾的（同一批 id 必然重复出现）。
-                    if path == "$ids":
-                        ctx.variables[var] = _page_summary(ctx.body)["ids"]
-                        continue
-                    try:
-                        ctx.variables[var] = dig(ctx.body, path)
-                    except KeyError:
-                        raise SetupError("save 取不到 " + path + "（用例 id：" + case["id"] + "）") from None
+            _apply_save(ctx, op, case)
             if "assert" in op:
                 _run_asserts(ctx, op["assert"], result)
         return result
@@ -325,7 +353,28 @@ def _run_asserts(ctx, names_used, result):
             result.reasons.append("[" + name + "] " + reason)
 
 
-def _loop(ctx, op, token, result):
+def _apply_save(ctx, op, case):
+    """把本 op 的 `save` 落到变量表。
+
+    **循环里的每一轮都要调用它**：`loop_until` 的游标通常就是靠同一条 op 的 `save` 推进的
+    （`since: {s1}` ＋ `save: {s1: sync.nextSince}`）。此前 `_loop` 只发请求、从不应用 save，
+    于是游标永不更新、同一页取满 `max` 次后报「loop_until 在 N 次内没有满足」—— 症状像是
+    翻页实现有问题，实际是执行器少做了一步。
+    """
+    for var, path in (op.get("save") or {}).items():
+        # 哨兵 $ids：存本页的 platformMessageId 列表。
+        # 需要它的原因：跨页对比要有**显式基准**，而「把第一页当全量」
+        # 与「页间不得重复」是互相矛盾的（同一批 id 必然重复出现）。
+        if path == "$ids":
+            ctx.variables[var] = _page_summary(ctx.body)["ids"]
+            continue
+        try:
+            ctx.variables[var] = dig(ctx.body, path)
+        except KeyError:
+            raise SetupError("save 取不到 " + path + "（用例 id：" + case.get("id", "?") + "）") from None
+
+
+def _loop(ctx, op, token, result, case):
     spec = op["loop_until"]
     limit = op.get("max")
     if not isinstance(limit, int) or limit < 1:
@@ -334,6 +383,7 @@ def _loop(ctx, op, token, result):
         status, body = request(ctx, {"req": op["req"]}, token)
         ctx.status, ctx.body = status, body
         ctx.pages.append(_page_summary(body))
+        _apply_save(ctx, op, case)
         if "assert" in op:
             _run_asserts(ctx, op["assert"], result)
         if eval_condition(spec, ctx):
@@ -425,7 +475,12 @@ def main(argv=None) -> int:
         ctx = inv.Ctx(fixture=fixture, case=case)
         for slot, spec in (fixture.get("slots") or {}).items():
             ctx.variables["slot:" + slot] = spec.get("id", "")
-        result = run_case(case, ctx, args.token or None)
+        # 执行期的 SetupError 在这里补上用例名再抛：否则顶层只报「loop_until 在 80 次内没有满足」
+        # 之类的话，**看不出是哪条用例**，而契约套件里有 33 条、其中多条用同一个不变量。
+        try:
+            result = run_case(case, ctx, args.token or None)
+        except SetupError as e:
+            raise SetupError("用例 " + repr(case.get("id", "?")) + "：" + str(e)) from None
         result.requests = ctx.requests
         results.append(result)
 
