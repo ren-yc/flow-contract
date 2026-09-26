@@ -1,0 +1,12 @@
+本目录下的四份 Markdown 是 **ChatLab 项目**的文档原文快照。
+
+- 来源：https://github.com/ChatLab/ChatLab
+- 钉住的 commit：`3e0e0fbbfb2b80051d261d34bf8349d64ab4c6e8`
+- 许可：**GNU Affero General Public License v3.0（AGPL-3.0）**
+- 版权归 ChatLab 项目及其贡献者所有
+
+这些文件**原样收录、未作任何修改**。它们按 AGPL-3.0 分发，
+**与本仓库其余内容（用例、schema、runner、解释记录）的许可无关**——
+后者是本仓库自己的产物。
+
+若需在别处复用这些文档，请直接查阅上游仓库并遵守其许可。

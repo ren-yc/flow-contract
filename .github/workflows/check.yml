@@ -1,0 +1,39 @@
+# 契约仓库的门禁：规范快照完整性 + 隐私。
+#
+# 为什么这个仓库要独立门禁：它是 public 的，而内容是从真实聊天数据库派生出来的
+# 结论（用例、槽位名、解释记录）。隐私门**按文件类型分级**扫描——
+# 见 scripts/check_privacy.py 头部：第三方文档快照整体跳过，runner 的代码只扫
+# 密钥前缀与绝对路径（否则它自己的边界常量会被判死）。
+#
+# 不做的事：这里不跑任何 Rust。上游服务仓库把本仓库 clone 到 ./conformance 之后，
+# 由它们自己的 CI 执行 runner；本仓库只保证「发出去的东西是完整且不含隐私的」。
+name: check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: spec + privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # 快照必须与 SOURCES.sha256 逐字一致：它钉住的是「上游说了什么」，
+      # 手改快照会让这个证据失效——规范歧义应当写进 INTERPRETATION.md。
+      - name: spec snapshots match SOURCES.sha256
+        run: sha256sum -c SOURCES.sha256
+
+      - name: privacy gate (tiered by file type)
+        run: python3 scripts/check_privacy.py --tree
