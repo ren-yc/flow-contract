@@ -1,0 +1,22 @@
+{
+  "id": "nails-content-key-present",
+  "group": "nails",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "防回归：content 键必须存在（值可为空）",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "content_key_present"
+      ]
+    }
+  ]
+}

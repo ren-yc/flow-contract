@@ -1,0 +1,20 @@
+{
+  "id": "discovery-keyword-filter",
+  "group": "discovery",
+  "note": "带 keyword 的发现请求仍返回合法形状",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.sessions}",
+        "slot": "group_with_messages",
+        "query": {
+          "keyword": "a",
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "discovery_shape"
+      ]
+    }
+  ]
+}

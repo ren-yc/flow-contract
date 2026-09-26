@@ -1,0 +1,22 @@
+{
+  "id": "cursor-page-size-lower-bound",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "limit=N 且余量充足时，页大小不小于 N",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "3"
+        }
+      },
+      "assert": [
+        "page_size_lower_bound_and_hasMore"
+      ]
+    }
+  ]
+}

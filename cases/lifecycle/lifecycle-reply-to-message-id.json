@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-reply-to-message-id",
+  "group": "lifecycle",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "引用字段出现即字符串，绝不出现空值",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "replyToMessageId_is_string_never_null",
+        "replyToMessageId_reference_valid"
+      ]
+    }
+  ]
+}

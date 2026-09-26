@@ -1,0 +1,25 @@
+{
+  "id": "pull-envelope-full",
+  "group": "envelope",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "全量拉取的五块信封与 chatlab 头信息",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "envelope_five_blocks",
+        "version_is_0_0_2",
+        "exportedAt_seconds_number",
+        "generator_nonempty_string"
+      ]
+    }
+  ]
+}

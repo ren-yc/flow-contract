@@ -1,0 +1,26 @@
+{
+  "id": "pull-meta-fields",
+  "group": "envelope",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "meta 的字段与语义：名字非空、类型合法、群聊时 groupId 与路径一致",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "meta_name_nonempty",
+        "meta_type_matches_session",
+        "meta_groupId_matches_id",
+        "platform_matches_fixture",
+        "ownerId_is_string"
+      ]
+    }
+  ]
+}

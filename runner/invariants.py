@@ -378,22 +378,32 @@ def _same_second(ctx: Ctx) -> str | None:
 
 @invariant("cursor_exclusive_no_gap_no_dup", "游标回传不重不丢（跨页无重复 id）")
 def _cursor_no_dup(ctx: Ctx) -> str | None:
-    seen = ctx.captured.setdefault("all_ids", set())
-    for m in _messages(ctx):
-        v = m.get("platformMessageId")
-        if v in seen:
-            return f"跨页重复：{v!r}（游标非排他）"
-        seen.add(v)
+    if len(ctx.pages) < 2:
+        return None
+    seen: set = set()
+    for page in ctx.pages[:-1]:
+        seen |= set(page.get("ids", []))
+    dup = seen & set(ctx.pages[-1].get("ids", []))
+    if dup:
+        return f"跨页重复：{sorted(dup)[:3]}（游标非排他）"
     return None
 
 
 @invariant("drained_set_equals_full_set", "翻页排空后的 id 全集等于一次性全量的 id 全集")
+# 基准是**显式**的：用例先用一次大 limit 取全量并 save 成 full_ids（哨兵 $ids），
+# 再翻页排空。不能用「第一页当全量」——那批 id 会在排空时重复出现，
+# 与「页间不得重复」直接冲突。
 def _drained_eq_full(ctx: Ctx) -> str | None:
-    drained = ctx.captured.get("all_ids")
-    full = ctx.captured.get("full_ids")
-    if drained is None or full is None:
-        return "缺少对比基准：需要先取一次全量、再翻页排空"
-    if drained != full:
+    full_ids = ctx.variables.get("full_ids")
+    if not isinstance(full_ids, list):
+        return "缺少基准：先用一次大 limit 取全量并 save 成 full_ids（值写 $ids）"
+    if not ctx.pages:
+        return "还没有任何一页：需要先翻页排空"
+    full = set(full_ids)
+    drained: set = set()
+    for page in ctx.pages:
+        drained |= set(page.get("ids", []))
+    if full != drained:
         return f"排空后集合与全量不一致：多 {len(drained - full)} 条、少 {len(full - drained)} 条"
     return None
 
@@ -455,9 +465,11 @@ def _incremental(ctx: Ctx) -> str | None:
 
 @invariant("auth_transports_matrix", "五种传输方式等价（都返回成功）")
 def _auth_matrix(ctx: Ctx) -> str | None:
-    results = ctx.captured.get("auth_results")
+    # 探测结果由**夹具**提供：五通道各发一次请求是具身动作（需要真实服务与令牌），
+    # 不该由执行器反复试探；夹具没做探测时用例会先 skip 掉。
+    results = ctx.fixture.get("authProbed")
     if not results:
-        return "缺少五通道的探测结果"
+        return "夹具没有提供五通道的探测结果（authProbed）"
     bad = [k for k, v in results.items() if v != 200]
     if bad:
         return f"这些传输方式没有返回 200：{bad}"
@@ -532,6 +544,24 @@ def _reply_valid(ctx: Ctx) -> str | None:
         ref = m.get("replyToMessageId")
         if isinstance(ref, str) and ref not in ids and ref in known:
             return f"replyToMessageId {ref!r} 指向本会话一条存在但不在本页的消息——本页断言不该依赖跨页匹配"
+    return None
+
+
+@invariant("event_notification_shape", "通知帧只带元信息，不带消息体；字段齐全且类型正确")
+def _event_shape(ctx: Ctx) -> str | None:
+    ev = ctx.last_event
+    if not isinstance(ev, dict):
+        return f"事件载荷应为对象，实际 {type(ev).__name__}"
+    for key in ("eventId", "sessionId"):
+        v = ev.get(key)
+        if not isinstance(v, str) or not v:
+            return f"事件缺 {key}（或不是非空字符串）：{ev!r}"
+    raw_ts = ev.get("timestamp")
+    ts = _int(raw_ts)
+    if ts is None or not (TS_MIN < ts < TS_MAX):
+        return f"事件 timestamp 应为秒级整数，实际 {raw_ts!r}"
+    if "messages" in ev or "content" in ev:
+        return "通知帧不该带消息体：它只负责告诉客户端「有新消息」，正文由拉取取回"
     return None
 
 

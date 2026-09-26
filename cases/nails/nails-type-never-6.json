@@ -1,0 +1,22 @@
+{
+  "id": "nails-type-never-6",
+  "group": "nails",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "防回归：类型码永不为保留位",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "type_in_subset_never_6"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "cursor-offset-and-since",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "offset 与 since 可叠加",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "0",
+          "offset": "1",
+          "limit": "5"
+        }
+      },
+      "assert": [
+        "offset_and_since_composable"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "pull-members-shape",
+  "group": "envelope",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "成员表的唯一性、与发送者的覆盖关系、显示名与头像类型",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "members_unique_platformId",
+        "members_match_page_senders",
+        "members_accountName_nonempty",
+        "members_avatar_is_string"
+      ]
+    }
+  ]
+}

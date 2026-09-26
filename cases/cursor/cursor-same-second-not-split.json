@@ -1,0 +1,28 @@
+{
+  "id": "cursor-same-second-not-split",
+  "group": "cursor",
+  "requires": [
+    "slot:same_second_burst"
+  ],
+  "note": "同一秒内不切页：前页末条必须早于后页首条",
+  "ops": [
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 80,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "same_second_burst",
+        "query": {
+          "since": "{s1}",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "s1": "sync.nextSince"
+      },
+      "assert": [
+        "same_second_not_split"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "id": "cursor-exclusive-no-gap-no-dup",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "游标排他：翻页之间不重复",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "3"
+        }
+      },
+      "assert": [
+        "cursor_exclusive_no_gap_no_dup"
+      ]
+    },
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 80,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "{s1}",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "s1": "sync.nextSince"
+      },
+      "assert": [
+        "cursor_exclusive_no_gap_no_dup",
+        "since_exclusive_end_inclusive"
+      ]
+    }
+  ]
+}

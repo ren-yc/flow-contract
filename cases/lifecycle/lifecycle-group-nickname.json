@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-group-nickname",
+  "group": "lifecycle",
+  "requires": [
+    "slot:group_with_messages",
+    "capability:sse"
+  ],
+  "note": "群名片是字符串；非空时与显示名不同",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "groupNickname_semantics"
+      ]
+    }
+  ]
+}

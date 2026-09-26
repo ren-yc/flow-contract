@@ -1,0 +1,33 @@
+{
+  "id": "sse-deregister-replay",
+  "group": "lifecycle",
+  "requires": [
+    "capability:sse"
+  ],
+  "note": "注销后带旧事件号重连：拿到的是带代号的基线，而不是旧账号的事件",
+  "ops": [
+    {
+      "sse_open": {
+        "endpoint": "push",
+        "as": "s"
+      }
+    },
+    {
+      "call": "harness.deregister"
+    },
+    {
+      "sse_expect": {
+        "event": "sync",
+        "within_s": 45,
+        "assert": [
+          "deregister_replay_consistent"
+        ]
+      }
+    },
+    {
+      "sse_close": {
+        "as": "s"
+      }
+    }
+  ]
+}

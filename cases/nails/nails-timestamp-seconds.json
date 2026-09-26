@@ -1,0 +1,22 @@
+{
+  "id": "nails-timestamp-seconds",
+  "group": "nails",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "防回归：时间戳是秒级且非递减（毫秒化会被抓到）",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "timestamps_non_decreasing_seconds"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "cursor-terminal-state",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "排空后 hasMore 为假、nextOffset 归零",
+  "ops": [
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 80,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "{s1}",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "s1": "sync.nextSince"
+      }
+    },
+    {
+      "assert": [
+        "drained_cursor_terminal_state"
+      ]
+    }
+  ]
+}

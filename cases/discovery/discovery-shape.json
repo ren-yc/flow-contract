@@ -1,0 +1,20 @@
+{
+  "id": "discovery-shape",
+  "group": "discovery",
+  "note": "发现端点的会话项字段齐全、类型合法",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.sessions}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "discovery_shape",
+        "session_ids_resolvable_by_pull"
+      ]
+    }
+  ]
+}

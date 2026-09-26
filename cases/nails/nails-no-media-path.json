@@ -1,0 +1,22 @@
+{
+  "id": "nails-no-media-path",
+  "group": "nails",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "防回归：拉取面不再出现已移除的媒体路径字段",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "no_mediaPath_in_pull"
+      ]
+    }
+  ]
+}

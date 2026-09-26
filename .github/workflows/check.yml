@@ -42,3 +42,8 @@ jobs:
       # 自测对每条不变量成对验证：该过的过、该拦的拦（只验前者等于没验）。
       - name: runner self-test (invariants)
         run: python3 runner/selftest.py
+
+      # 用例引用了不存在的不变量 / 能力 / 端点，或 id 重复——这些在跑之前就能查出来，
+      # 留到执行期只会得到一个难懂的失败。
+      - name: case files are internally consistent
+        run: python3 runner/check_cases.py

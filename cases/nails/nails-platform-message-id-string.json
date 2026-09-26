@@ -1,0 +1,22 @@
+{
+  "id": "nails-platform-message-id-string",
+  "group": "nails",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "防回归：id 必须是字符串、页内唯一",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "platformMessageId_string_unique_stable"
+      ]
+    }
+  ]
+}

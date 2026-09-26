@@ -1,0 +1,22 @@
+{
+  "id": "lifecycle-owner-exactly-one",
+  "group": "lifecycle",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "每个群里至多一人是群主",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "isOwner_exactly_one"
+      ]
+    }
+  ]
+}

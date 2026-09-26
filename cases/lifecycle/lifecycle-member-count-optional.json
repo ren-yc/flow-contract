@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-member-count-optional",
+  "group": "lifecycle",
+  "requires": [
+    "capability:memberCount"
+  ],
+  "note": "成员数是可选项；出现时须为非负且不小于本页发送者数",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.sessions}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "memberCount_optional_not_required",
+        "memberCount_value_semantics"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "cursor-since-default-earliest",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "缺省 since 从最早一页正序返回",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "since_default_starts_at_earliest"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "pull-private-envelope",
+  "group": "envelope",
+  "requires": [
+    "slot:private_with_messages"
+  ],
+  "note": "私聊会话同样满足五块信封；群名片在私聊里为空串",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "private_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "envelope_five_blocks",
+        "meta_type_matches_session",
+        "groupNickname_semantics"
+      ]
+    }
+  ]
+}

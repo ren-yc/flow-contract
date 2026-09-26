@@ -1,0 +1,35 @@
+{
+  "id": "cursor-since-exclusive",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "since 是排他下界：不会返回不晚于它的消息",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "5"
+        }
+      },
+      "save": {
+        "w": "sync.nextSince"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "{w}",
+          "limit": "5"
+        }
+      },
+      "assert": [
+        "since_exclusive_end_inclusive"
+      ]
+    }
+  ]
+}

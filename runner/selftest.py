@@ -80,11 +80,14 @@ del b["meta"]
 check("缺 meta 块被拦", run("envelope_five_blocks", ctx_with(b)) is not None)
 
 print("B 组：游标")
-c = ctx_with(envelope(), variables={"request_since": 1790000000},
-             captured={"all_ids": {"P1"}, "full_ids": {"P1"}})
+c = ctx_with(envelope(), variables={"request_since": 1790000000})
+c.pages = [{"ids": ["P1"]}, {"ids": ["P2"]}]
 for n in ("since_exclusive_end_inclusive", "drained_cursor_terminal_state",
-          "drained_set_equals_full_set", "since_default_starts_at_earliest"):
+          "since_default_starts_at_earliest", "cursor_exclusive_no_gap_no_dup"):
     check(n + " 通过合法响应", run(n, c) is None)
+c = ctx_with(envelope(), variables={"full_ids": ["P1", "P2"]})
+c.pages = [{"ids": ["P1"]}, {"ids": ["P2"]}]
+check("drained_set_equals_full_set 通过合法响应", run("drained_set_equals_full_set", c) is None)
 b = envelope()
 b["messages"][0]["timestamp"] = 1789999999
 check("早于 since 的消息被拦", run("since_exclusive_end_inclusive",
@@ -92,7 +95,8 @@ check("早于 since 的消息被拦", run("since_exclusive_end_inclusive",
 b = envelope()
 b["sync"]["nextOffset"] = 5
 check("排空后 nextOffset 非零被拦", run("drained_cursor_terminal_state", ctx_with(b)) is not None)
-c = ctx_with(envelope(), captured={"all_ids": {"P1", "P2"}, "full_ids": {"P1"}})
+c = ctx_with(envelope(), variables={"full_ids": ["P1"]})
+c.pages = [{"ids": ["P1"]}, {"ids": ["P2"]}]
 check("排空集合与全量不一致被拦", run("drained_set_equals_full_set", c) is not None)
 
 print("C 组：发现端点")
@@ -138,10 +142,13 @@ check("同一秒跨页被拦", run("same_second_not_split", c) is not None)
 c.pages = [{"last_ts": 99}, {"first_ts": 100}]
 check("跨页边界正常时通过", run("same_second_not_split", c) is None)
 
-c = ctx_with(envelope(), captured={"all_ids": {"P1"}})   # P1 正是响应里那条
+# P1 在两页里都出现 → 游标不排他，应被拦
+c = ctx_with(envelope())
+c.pages = [{"ids": ["P1"]}, {"ids": ["P1"]}]
 check("跨页重复 id 被拦", run("cursor_exclusive_no_gap_no_dup", c) is not None)
-c = ctx_with(envelope(), captured={"all_ids": set()})
-check("首次见到该 id 时通过", run("cursor_exclusive_no_gap_no_dup", c) is None)
+c = ctx_with(envelope())
+c.pages = [{"ids": ["P1"]}, {"ids": ["P2"]}]
+check("两页无重叠时通过", run("cursor_exclusive_no_gap_no_dup", c) is None)
 
 c = ctx_with(envelope())
 c.status = 200
@@ -152,9 +159,11 @@ check("增量里出现旧消息被拦", run("incremental_only_new", c) is not No
 c = ctx_with(envelope(), variables={"watermark": 1790000000})
 check("增量只含新消息时通过", run("incremental_only_new", c) is None)
 
-c = ctx_with({}, captured={"auth_results": {"bearer": 200, "x-api-key": 200, "access_token": 200, "token": 200, "body": 200}})
+c = ctx_with({})
+c.fixture["authProbed"] = {"bearer": 200, "x-api-key": 200, "access_token": 200, "token": 200, "body": 200}
 check("五通道全 200 时通过", run("auth_transports_matrix", c) is None)
-c = ctx_with({}, captured={"auth_results": {"bearer": 200, "body": 401}})
+c = ctx_with({})
+c.fixture["authProbed"] = {"bearer": 200, "body": 401}
 check("有一条通道没返回 200 被拦", run("auth_transports_matrix", c) is not None)
 
 c = ctx_with({})

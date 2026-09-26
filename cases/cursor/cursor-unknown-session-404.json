@@ -1,0 +1,22 @@
+{
+  "id": "cursor-unknown-session-404",
+  "group": "cursor",
+  "requires": [
+    "slot:unknown"
+  ],
+  "note": "未知会话返回 404，且错误体走统一信封",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "unknown",
+        "query": {
+          "limit": "5"
+        }
+      },
+      "assert": [
+        "unknown_session_404_envelope"
+      ]
+    }
+  ]
+}

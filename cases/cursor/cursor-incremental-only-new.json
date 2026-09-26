@@ -1,0 +1,41 @@
+{
+  "id": "cursor-incremental-only-new",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "增量只含水位线之后的新消息",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "watermark": "sync.nextSince"
+      }
+    },
+    {
+      "call": "harness.append_message",
+      "args": {
+        "slot": "group_with_messages"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "{watermark}",
+          "limit": "10"
+        }
+      },
+      "assert": [
+        "incremental_only_new"
+      ]
+    }
+  ]
+}

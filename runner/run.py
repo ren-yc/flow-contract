@@ -280,6 +280,12 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 ctx.variables["request_since"] = (op["req"].get("query") or {}).get("since")
             if "save" in op:
                 for var, path in op["save"].items():
+                    # 哨兵 $ids：存本页的 platformMessageId 列表。
+                    # 需要它的原因：跨页对比要有**显式基准**，而「把第一页当全量」
+                    # 与「页间不得重复」是互相矛盾的（同一批 id 必然重复出现）。
+                    if path == "$ids":
+                        ctx.variables[var] = _page_summary(ctx.body)["ids"]
+                        continue
                     try:
                         ctx.variables[var] = dig(ctx.body, path)
                     except KeyError:
@@ -293,10 +299,18 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
         return result
 
 
+# 每一页都记下 id 与时间戳：跨页断言（不重不丢、排空等于全量、同秒不切页）
+# 全部靠这些摘要，不需要用例额外声明什么——声明越少，用例越不容易写错。
 def _page_summary(body):
     msgs = body.get("messages", []) if isinstance(body, dict) else []
     ts = [m.get("timestamp") for m in msgs if isinstance(m.get("timestamp"), int)]
-    return {"first_ts": ts[0] if ts else None, "last_ts": ts[-1] if ts else None}
+    ids = [m.get("platformMessageId") for m in msgs if isinstance(m.get("platformMessageId"), str)]
+    return {
+        "first_ts": ts[0] if ts else None,
+        "last_ts": ts[-1] if ts else None,
+        "ids": ids,
+        "n": len(msgs),
+    }
 
 
 def _run_asserts(ctx, names_used, result):

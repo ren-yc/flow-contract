@@ -1,0 +1,44 @@
+{
+  "id": "cursor-drain-equals-full",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "翻页排空后的 id 全集，等于一次性大 limit 取回的全集",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "full_ids": "$ids",
+        "w": "sync.nextSince"
+      }
+    },
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 80,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "{w}",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "w": "sync.nextSince"
+      }
+    },
+    {
+      "assert": [
+        "drained_set_equals_full_set",
+        "drained_cursor_terminal_state"
+      ]
+    }
+  ]
+}

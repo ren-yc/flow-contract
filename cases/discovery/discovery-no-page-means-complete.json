@@ -1,0 +1,19 @@
+{
+  "id": "discovery-no-page-means-complete",
+  "group": "discovery",
+  "note": "没有 page 块时，返回数不得超过 limit",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.sessions}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "5"
+        }
+      },
+      "assert": [
+        "no_page_implies_complete"
+      ]
+    }
+  ]
+}

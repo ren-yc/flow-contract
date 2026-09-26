@@ -80,6 +80,13 @@
       "additionalProperties": {
         "type": "boolean"
       }
+    },
+    "authProbed": {
+      "type": "object",
+      "description": "五通道鉴权探测结果：传输名 → HTTP 状态码。由 harness 生成（需要真实服务），缺失时相关用例会 skip。",
+      "additionalProperties": {
+        "type": "integer"
+      }
     }
   }
 }

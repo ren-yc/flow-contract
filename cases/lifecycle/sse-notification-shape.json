@@ -1,0 +1,37 @@
+{
+  "id": "sse-notification-shape",
+  "group": "lifecycle",
+  "requires": [
+    "capability:sse",
+    "slot:group_with_messages"
+  ],
+  "note": "推送帧只带元信息、不带消息体",
+  "ops": [
+    {
+      "sse_open": {
+        "endpoint": "push",
+        "as": "s"
+      }
+    },
+    {
+      "call": "harness.append_message",
+      "args": {
+        "slot": "group_with_messages"
+      }
+    },
+    {
+      "sse_expect": {
+        "event": "message.new",
+        "within_s": 45,
+        "assert": [
+          "event_notification_shape"
+        ]
+      }
+    },
+    {
+      "sse_close": {
+        "as": "s"
+      }
+    }
+  ]
+}

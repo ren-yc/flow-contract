@@ -1,0 +1,19 @@
+{
+  "id": "lifecycle-message-count-parametrized",
+  "group": "lifecycle",
+  "note": "消息数按平台参数化，不做跨平台等值断言",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.sessions}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "messageCount_parametrized_semantics"
+      ]
+    }
+  ]
+}

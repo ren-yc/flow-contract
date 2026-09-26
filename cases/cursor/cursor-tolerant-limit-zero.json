@@ -1,0 +1,22 @@
+{
+  "id": "cursor-tolerant-limit-zero",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "limit=0 退化为默认而不是 4xx",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "0"
+        }
+      },
+      "assert": [
+        "tolerant_pagination_params"
+      ]
+    }
+  ]
+}

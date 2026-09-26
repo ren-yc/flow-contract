@@ -129,7 +129,8 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "description": "点名内置不变量；名字必须在注册表里（含大写，如 exportedAt_seconds_number）"
           },
           "description": "点名内置不变量；名字必须在注册表里"
         },
@@ -216,7 +217,8 @@
           "description": "call 的参数（如 append_message 的 target 槽位）；只有 call 用得到"
         }
       },
-      "oneOf": [
+      "description": "9 个 op：req / save / assert / loop_until / skip_if / call / sse_open / sse_expect / sse_close。一个 op 里可以同时出现 req 与 assert（先请求、后断言）。执行器按固定顺序求值：skip_if → sse_* → call → loop_until → req → save → assert。",
+      "anyOf": [
         {
           "required": [
             "req"
@@ -244,11 +246,6 @@
         },
         {
           "required": [
-            "save"
-          ]
-        },
-        {
-          "required": [
             "sse_open"
           ]
         },
@@ -262,8 +259,7 @@
             "sse_close"
           ]
         }
-      ],
-      "description": "9 个 op：req / save / assert / loop_until / skip_if / call / sse_open / sse_expect / sse_close。判断逻辑一律在 runner 的注册表里，因此用例始终是数据。"
+      ]
     }
   }
 }
