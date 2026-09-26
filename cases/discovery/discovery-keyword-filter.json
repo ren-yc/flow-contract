@@ -16,5 +16,8 @@
         "discovery_shape"
       ]
     }
+  ],
+  "requires": [
+    "capability:pullDiscovery"
   ]
 }

@@ -16,5 +16,8 @@
         "session_ids_resolvable_by_pull"
       ]
     }
+  ],
+  "requires": [
+    "capability:pullDiscovery"
   ]
 }

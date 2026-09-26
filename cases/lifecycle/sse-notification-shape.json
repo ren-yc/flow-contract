@@ -3,13 +3,15 @@
   "group": "lifecycle",
   "requires": [
     "capability:sse",
-    "slot:group_with_messages"
+    "slot:group_with_messages",
+    "capability:pullNotification"
   ],
   "note": "推送帧只带元信息、不带消息体",
   "ops": [
     {
       "sse_open": {
-        "endpoint": "push"
+        "endpoint": "push",
+        "as": "s"
       }
     },
     {
@@ -24,11 +26,14 @@
         "within_s": 45,
         "assert": [
           "event_notification_shape"
-        ]
+        ],
+        "as": "s"
       }
     },
     {
-      "sse_close": {}
+      "sse_close": {
+        "as": "s"
+      }
     }
   ]
 }

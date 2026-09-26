@@ -179,6 +179,11 @@
           ],
           "additionalProperties": false,
           "properties": {
+            "as": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]+$",
+              "description": "要读取的流句柄名，默认 stream。**必须与 sse_open 的 `as` 一致** —— 此前本 schema 漏了这个键，于是给流起了名的用例永远够不到它（执行器其实一直支持）。"
+            },
             "event": {
               "type": "string",
               "description": "要等待的 event 名，如 message.new"

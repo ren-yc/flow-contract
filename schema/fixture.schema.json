@@ -69,11 +69,13 @@
     },
     "capabilities": {
       "type": "object",
-      "description": "「能力存在性差异」的机器可读载体；缺失的能力由用例 skip 而非 fail。",
+      "description": "「能力存在性差异」的机器可读载体；缺失的能力由用例 skip 而非 fail。\n\n`pullDiscovery` / `pullNotification` 门控的是 **Pull 形状**的发现与通知面（规范里的 `GET {baseUrl}/sessions` 与 `GET {baseUrl}/push/messages`）：两仓库当前只在各自的 `/api/v1/*` 上提供等价能力，Pull 形状的路由尚未实现，因此置 false；实现后翻成 true 即可启用相关用例。",
       "required": [
         "mediaById",
         "sns",
         "memberCount",
+        "pullDiscovery",
+        "pullNotification",
         "roles",
         "sse"
       ],

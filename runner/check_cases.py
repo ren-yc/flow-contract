@@ -87,15 +87,25 @@ def main() -> int:
                         + ": skip_if/loop_until 只支持 `a.b == 字面量`，实际 "
                         + repr(expr)
                     )
-            # `sse_expect` **不能**带 `as`（见 case.schema.json），所以一旦 sse_open 给流起了名，
-            # 中间那条 expect 就永远够不到它 —— schema 本身不自洽。这条检查把该矛盾提前暴露：
-            # 改为使用默认流名（不写 `as`）即可。
+            # 流句柄必须两边一致：`sse_open` 起的名与 `sse_expect`/`sse_close` 找的名对不上，
+            # 执行器会报「还没有打开流」。此前 `sse_expect` 在 schema 里**没有 `as`**，于是
+            # 起了名的用例永远够不到它 —— 那是 schema 的漏，不是用例的错，已经补上；这条检查
+            # 防的是另一半：两边写得不一样。
             if op.get("sse_open", {}).get("as"):
-                if any(later.get("sse_expect") for later in case.get("ops", [])):
-                    problems.append(
-                        str(rel)
-                        + ": sse_open 命名了流，但 sse_expect 无法寻址（它不接受 as）——改用默认流名"
-                    )
+                opened = op["sse_open"]["as"]
+                for later in case.get("ops", []):
+                    for key in ("sse_expect", "sse_close"):
+                        got = (later.get(key) or {}).get("as")
+                        if got is not None and got != opened:
+                            problems.append(
+                                str(rel)
+                                + ": 流句柄不一致：sse_open 用 "
+                                + repr(opened)
+                                + "，"
+                                + key
+                                + " 用 "
+                                + repr(got)
+                            )
             for name in op.get("assert", []):
                 asserts_used.add(name)
             # 断言也可以挂在 sse_expect 里（等事件到达后再判）；漏掉它会让

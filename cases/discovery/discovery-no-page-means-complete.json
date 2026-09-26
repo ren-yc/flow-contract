@@ -15,5 +15,8 @@
         "no_page_implies_complete"
       ]
     }
+  ],
+  "requires": [
+    "capability:pullDiscovery"
   ]
 }
