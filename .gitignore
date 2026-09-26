@@ -1,0 +1,12 @@
+# 本仓库是 public 的，且输入来自真实聊天数据库 —— 以下产物绝不入库
+fixture.json
+report.json
+*.db
+*.log
+
+# 上游仓库 clone 本仓时落地的目录名（不进上游仓库，这里也挡住）
+conformance/
+
+# Python
+__pycache__/
+*.pyc
