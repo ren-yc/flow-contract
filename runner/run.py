@@ -162,7 +162,11 @@ def sse_open(ctx, op, token: str | None):
 
 
 def _read_event(resp, within_s: float):
-    """读一帧 SSE；返回 (event_name, data_str)。超时返回 (None, None)。"""
+    """读一帧 SSE；返回 (event_name, data_str)。
+
+    超时与**连接被对端关闭**都会返回 (None, None)，但二者的含义完全不同（一个是「还没来」，
+    一个是「流没了」），所以关闭那一侧额外抛出 —— 报错里混着说会让人去查错方向。
+    """
     import time
     deadline = time.time() + within_s
     event = None
@@ -170,7 +174,7 @@ def _read_event(resp, within_s: float):
     while time.time() < deadline:
         line = resp.readline()
         if not line:
-            return None, None
+            raise SetupError("SSE 连接被对端关闭（读到 EOF）—— 流已结束，不是超时")
         text = line.decode("utf-8", "replace").rstrip("\r\n")
         if text == "":
             if event or data_lines:
