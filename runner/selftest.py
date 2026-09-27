@@ -130,11 +130,17 @@ c = ctx_with({})
 c.status = 400
 check("非法分页参数返回 400 被拦", run("tolerant_pagination_params", c) is not None)
 
-c = ctx_with({"error": {"code": "not_found", "message": "no such session"}})
+c = ctx_with({"success": False, "code": 404, "message": "session not found"})
 c.status = 404
 check("404 + 统一信封时通过", run("unknown_session_404_envelope", c) is None)
 c.status = 200
 check("404 却返回 200 被拦", run("unknown_session_404_envelope", c) is not None)
+c = ctx_with({"error": {"code": "not_found", "message": "no such session"}})
+c.status = 404
+check("旧的 error 形状不再被当作统一信封", run("unknown_session_404_envelope", c) is not None)
+c = ctx_with({"success": False, "code": 404})
+c.status = 404
+check("缺 message 被拦", run("unknown_session_404_envelope", c) is not None)
 
 c = ctx_with(envelope())
 c.pages = [{"last_ts": 100}, {"first_ts": 100}]

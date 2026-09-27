@@ -358,10 +358,23 @@ def _tolerant(ctx: Ctx) -> str | None:
 
 @invariant("unknown_session_404_envelope", "未知会话返回 404，且错误体走统一信封")
 def _unknown_404(ctx: Ctx) -> str | None:
+    # 信封的字段名**曾按 `{"error": …}` 断言，而两个上游仓库实现与文档化的都是
+    # `{"success": false, "code": <http>, "message": …}`（见各仓库 `server/error.rs` 的模块头）。
+    # 规范里没有错误章节、也没提 404，所以那条断言没有规范依据 —— 已对齐实现。
+    #
+    # 新版**更严**，不是更松：三个键都要求，且 `success` 必须为 false、`code` 必须回显状态码。
+    # 「任意 dict 都算通过」会让这条不变量失去意义。
     if ctx.status != 404:
         return f"未知会话应返回 404，实际 {ctx.status}"
-    if not isinstance(ctx.body, dict) or "error" not in ctx.body:
-        return f"404 的响应体不是统一信封：{ctx.body!r}"
+    if not isinstance(ctx.body, dict):
+        return f"404 的响应体不是对象：{ctx.body!r}"
+    if ctx.body.get("success") is not False:
+        return f"404 的信封里 success 应为 false：{ctx.body!r}"
+    if ctx.body.get("code") != 404:
+        return f"404 的信封里 code 应回显 404：{ctx.body!r}"
+    msg = ctx.body.get("message")
+    if not isinstance(msg, str) or not msg:
+        return f"404 的信封里 message 应为非空字符串：{ctx.body!r}"
     return None
 
 
