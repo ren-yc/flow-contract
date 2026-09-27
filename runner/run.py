@@ -301,9 +301,12 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 sse_open(ctx, op, token)
                 continue
             if "sse_expect" in op:
+                # **不要 `continue` 走掉**：这一支和下面的 `req` 支一样要跑 `save` 与 `assert`。
+                # 原来它直接 `continue`，于是 `sse_expect` 里写的 `assert` **从未被执行** —— 用例看起来
+                # 在验「通知帧只带元信息」，实际只验了「来了一帧」。症状是「断言绿了但没在验东西」，
+                # 与「`loop_until` 从不应用 `save`」是同一类：**执行器少做一步，而用例看不出来**。
                 sse_expect(ctx, op)
-                continue
-            if "sse_close" in op:
+            elif "sse_close" in op:
                 handle = op["sse_close"].get("as", "stream")
                 pair = ctx.streams.pop(handle, None)
                 if pair:
