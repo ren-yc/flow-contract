@@ -301,11 +301,17 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 sse_open(ctx, op, token)
                 continue
             if "sse_expect" in op:
-                # **不要 `continue` 走掉**：这一支和下面的 `req` 支一样要跑 `save` 与 `assert`。
-                # 原来它直接 `continue`，于是 `sse_expect` 里写的 `assert` **从未被执行** —— 用例看起来
-                # 在验「通知帧只带元信息」，实际只验了「来了一帧」。症状是「断言绿了但没在验东西」，
-                # 与「`loop_until` 从不应用 `save`」是同一类：**执行器少做一步，而用例看不出来**。
+                # **不要 `continue` 走掉**，而且断言在 `sse_expect` **里面**（`{sse_expect: {assert: […]}}`），
+                # 不在 `op["assert"]` —— 只去掉 `continue` 是不够的：那样确实会走到 `_run_asserts`，
+                # 但取的是**空键**，等于没跑（我第一次就是这么「修」的，反向验证当场戳穿）。
+                #
+                # 原来的写法直接 `continue`，于是这些断言**从未被执行** —— 用例看起来在验「通知帧只带
+                # 元信息」，实际只验了「来了一帧」。与「`loop_until` 从不应用 `save`」同类：
+                # **执行器少做一步，而用例看不出来**。
+                spec = op["sse_expect"]
                 sse_expect(ctx, op)
+                if "assert" in spec:
+                    _run_asserts(ctx, spec["assert"], result)
             elif "sse_close" in op:
                 handle = op["sse_close"].get("as", "stream")
                 pair = ctx.streams.pop(handle, None)
