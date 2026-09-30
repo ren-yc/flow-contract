@@ -500,11 +500,15 @@ def _group_nickname(ctx: Ctx) -> str | None:
     return None
 
 
-@invariant("isOwner_exactly_one", "每个群里至多一人 isOwner 为真")
+@invariant("isOwner_exactly_one", "成员表里 isOwner 为真的恰好一人")
 def _is_owner(ctx: Ctx) -> str | None:
+    # 「恰好一人」而不是「至多一人」：0 个同样是缺陷 —— 群主数据整体丢失时
+    # 全 false 会静默通过旧判据，而那正是本不变量要拦的回归形态。
+    # 断言面是 group-members（两仓的该面都带 isOwner 键且数据源已接真）；
+    # 群主不在发言者集合的降级形态由各仓自己的快照与真库探针覆盖，不进本断言。
     owners = [m for m in _members(ctx) if m.get("isOwner") is True]
-    if len(owners) > 1:
-        return f"本页出现 {len(owners)} 个 isOwner 为真——每群应恰好一人"
+    if len(owners) != 1:
+        return f"成员表里 isOwner 为真的有 {len(owners)} 个——每群应恰好一人"
     return None
 
 

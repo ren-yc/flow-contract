@@ -36,8 +36,11 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-_ENDPOINT_TPL = re.compile(r"^\{endpoints\.([a-z0-9_]+)\}$")
-_VAR = re.compile(r"\{([a-zA-Z0-9_.]+)\}")
+# 端点名允许连字符（如 group-members）—— 与 case.schema 的模板模式保持同一字符集。
+_ENDPOINT_TPL = re.compile(r"^\{endpoints\.([a-z0-9_-]+)\}$")
+# 变量字符集含 `:` —— 槽位 id 以 `slot:名字` 存进变量表（fixture 装载处），
+# 正则不放行冒号时它就引用不到，这与 resolve 的文档（「端点名与槽位名也走同一套变量表」）矛盾。
+_VAR = re.compile(r"\{([a-zA-Z0-9_.:]+)\}")
 
 
 class SetupError(Exception):

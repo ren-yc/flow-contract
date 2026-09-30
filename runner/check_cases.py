@@ -41,7 +41,9 @@ def main() -> int:
     fsch = json.loads((ROOT / "schema/fixture.schema.json").read_text(encoding="utf-8"))
     # 夹具里允许出现的能力名：schema 的必填项加上示例中出现的可选项。
     known_caps = set(fsch["properties"]["capabilities"]["required"]) | {"groupNickname", "authProbe"}
-    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness"}
+    # 必填核心端点 + 两个「schema 不强制、但用例可以引用」的可选端点：
+    # `harness` 是控制面；`group-members` 是群主断言的落点（缺它的夹具会按 requires 跳过）。
+    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members"}
     # 槽位名没有固定词表（由夹具决定），但示例里给出的这几个是「约定俗成」的；
     # 因此这里只做**收集**，把用到的槽位打印出来供人核对。
 

@@ -2,16 +2,17 @@
   "id": "lifecycle-owner-exactly-one",
   "group": "lifecycle",
   "requires": [
-    "slot:group_with_messages"
+    "slot:group_with_messages",
+    "endpoint:group-members"
   ],
-  "note": "每个群里至多一人是群主",
+  "note": "成员表里恰一人是群主。断言面是 group-members（两仓的该面都带 isOwner 键、数据源已接真）；夹具把群主设成了该群的发言者，因为该面返回的是发言者集合。",
   "ops": [
     {
       "req": {
-        "GET": "{endpoints.pull}",
+        "GET": "{endpoints.group-members}",
         "slot": "group_with_messages",
         "query": {
-          "limit": "20"
+          "chatroomId": "{slot:group_with_messages}"
         }
       },
       "assert": [

@@ -114,6 +114,12 @@ check("replyToMessageId 为 null 被拦", run("replyToMessageId_is_string_never_
 b = envelope()
 b["members"].append({"platformId": "M2", "accountName": "乙", "groupNickname": "", "isOwner": True})
 check("两个群主被拦", run("isOwner_exactly_one", ctx_with(b)) is not None)
+b = envelope()
+b["members"][0]["isOwner"] = False
+check("没有群主被拦（0 同样是缺陷）", run("isOwner_exactly_one", ctx_with(b)) is not None)
+b = envelope()
+b["members"][0].pop("isOwner")
+check("没有 isOwner 键也被拦", run("isOwner_exactly_one", ctx_with(b)) is not None)
 
 
 print("补：其余不变量（该过的过、该拦的拦）")
