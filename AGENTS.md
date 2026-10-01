@@ -54,9 +54,13 @@ CI 有一个独立的隐私门 job，**按文件类型分级扫描**：
 
 ### tag 与 pin 流程
 
-- `VERSION` 与 git tag **必须一致**；runner 会校验仓库所 pin 的 tag 与 `VERSION`，不一致**直接失败**。
+- `VERSION` 与 git tag **必须一致**。runner 的校验分两层：① 夹具的 `contractVersion` 与 `VERSION` 的比对**总是**执行；
+  ② **能读到 git 时**（CI 就是 `git clone --branch <tag>`），再校验 HEAD 是否**正好**落在与 `VERSION` 同名的 tag 上。
+  任一层不一致都**直接失败**（exit 2）。读不到 git、或工作副本领先于最近的 tag 时，第二层只提示不失败 ——
+  那是开发时的常态，把它判死会让「本地先跑一遍」变得没法用。
 - 变更流程：① 在本仓提 PR → ② 打 tag → ③ **两个上游仓库各一个 PR** 同步升 pin。
-  runner 的校验保证**不可能只升一边**。
+  上面两层校验合起来保证**不可能只升一边**（上游忘了改夹具时，第一层在 runner 里就红；
+  忘了改 pin 时，CI clone 的 tag 与夹具版本对不上，同样红）。
 - **破坏性契约变更**（改断言、改 schema、改 `capabilities`）需要 minor 或 major 级的 tag。
 
 ## 目录

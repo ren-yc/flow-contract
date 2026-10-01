@@ -12,7 +12,8 @@
                          [--report FILE] [--token T] [--case SUBSTR] [--fail-on-skip]
 
 退出码：0 全通过（可能含 skip，已列出）／1 断言失败，或带 --fail-on-skip 时**有跳过**
-        ／2 环境或用例非法。
+        ／2 环境或用例非法（含：夹具的 contractVersion 与 VERSION 不一致，或 HEAD 所在的
+        tag 与 VERSION 不一致）。
 
 为什么要有 --fail-on-skip：**「跳过」与「通过」必须能被调用方区分**。默认仍是 0（skip
 只进摘要，供人读），但那等于把「这条用例到底跑没跑」交给读者；门禁需要的是机器可判定的
@@ -26,6 +27,7 @@ import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
@@ -505,6 +507,32 @@ def main(argv=None) -> int:
         print("[一致性套件] 夹具的 contractVersion=" + repr(fixture.get("contractVersion"))
               + " 与 VERSION=" + repr(version) + " 不一致", file=sys.stderr)
         return 2
+
+    # tag 自洽：**能读到 git 时**，HEAD 必须正好落在与 VERSION 同名的 tag 上。
+    # 为什么值得单独查：夹具的 contractVersion 是上游手写的常量，而「上游到底 pin 了哪个
+    # tag」只有 git 知道 —— 只改 conformance.pin 而忘了夹具（或反过来）在本地不会红，
+    # 而 CI clone 的是 tag 指向的那份代码。上游 runner 因此不再只是「声称」校验 tag。
+    #
+    # 读不到 git（没有 .git、没装 git）或 HEAD 不在任何 tag 上时**只提示不失败**：
+    # 开发工作副本天然领先于最近的 tag，把那种状态判成环境错误会让本地跑一遍变得没法用。
+    if (here.parent / ".git").exists():
+        tag = None
+        try:
+            tag = subprocess.run(
+                ["git", "-C", str(here.parent), "describe", "--tags", "--exact-match", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            tag = None
+        if tag is not None and tag.returncode == 0:
+            name = tag.stdout.strip()
+            if version and name not in (version, "v" + version):
+                print("[一致性套件] HEAD 落在 tag " + repr(name) + " 上，而 VERSION="
+                      + repr(version) + " —— 两者必须一致", file=sys.stderr)
+                return 2
+        else:
+            print("[一致性套件] HEAD 不在任何 tag 上（或读不到 git）——跳过 tag 校验，"
+                  "夹具与 VERSION 的比对已执行", file=sys.stderr)
 
     fixture["_base_url"] = args.base_url
 
