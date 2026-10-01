@@ -504,8 +504,14 @@ def _group_nickname(ctx: Ctx) -> str | None:
 def _is_owner(ctx: Ctx) -> str | None:
     # 「恰好一人」而不是「至多一人」：0 个同样是缺陷 —— 群主数据整体丢失时
     # 全 false 会静默通过旧判据，而那正是本不变量要拦的回归形态。
-    # 断言面是 group-members（两仓的该面都带 isOwner 键且数据源已接真）；
-    # 群主不在发言者集合的降级形态由各仓自己的快照与真库探针覆盖，不进本断言。
+    # 断言面是 group-members（两仓的该面都带 isOwner 键且数据源已接真）。
+    #
+    # **前置条件（用例侧声明，这里如实写明）**：本断言要求夹具**确实提供群主数据**，
+    # 且群主落在该群的发言者集合里（group-members 返回的是发言者）。
+    # 服务端**合法的降级形态**——群主不在本页、或缺 group_info.db / chat_room 表——
+    # 会返回合理的全 false，而本断言**并不知道自己拿到的是哪种数据**：它不会跳过，
+    # 只会判红。也就是说降级形态的覆盖在**各仓自己的 golden 快照与真库探针**那里，
+    # 但本断言并不因此放行 —— 夹具没把群主摆成发言者时，得到的是响亮的失败。
     owners = [m for m in _members(ctx) if m.get("isOwner") is True]
     if len(owners) != 1:
         return f"成员表里 isOwner 为真的有 {len(owners)} 个——每群应恰好一人"

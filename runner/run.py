@@ -8,9 +8,15 @@
   * **skip 必须响亮**：跳过的用例进报告、进摘要，绝不静默通过。
 
 用法：
-    python runner/run.py --base-url URL --cases DIR --fixture FILE [--report FILE] [--token T]
+    python runner/run.py --base-url URL --cases DIR --fixture FILE
+                         [--report FILE] [--token T] [--case SUBSTR] [--fail-on-skip]
 
-退出码：0 全通过（可能含 skip，已列出）／1 断言失败／2 环境或用例非法。
+退出码：0 全通过（可能含 skip，已列出）／1 断言失败，或带 --fail-on-skip 时**有跳过**
+        ／2 环境或用例非法。
+
+为什么要有 --fail-on-skip：**「跳过」与「通过」必须能被调用方区分**。默认仍是 0（skip
+只进摘要，供人读），但那等于把「这条用例到底跑没跑」交给读者；门禁需要的是机器可判定的
+信号——CI 带上本开关后，用例因缺端点/槽位/能力而被跳过时**直接失败**，而不是绿着过去。
 """
 
 from __future__ import annotations
@@ -453,6 +459,12 @@ def main(argv=None) -> int:
         help="只跑 id 含这些子串的用例（可重复）。用于把一条用例单独拉出来查："
         "一整套跑下来时，报错本身往往不足以定位到是哪条路径出的问题。",
     )
+    ap.add_argument(
+        "--fail-on-skip",
+        action="store_true",
+        help="有用例被跳过时返回 1（默认为 0，跳过只进摘要）。门禁应当带上它："
+        "否则「夹具少声明一个端点」这类改动会让用例静默变成不跑，而 CI 仍是绿的。",
+    )
     args = ap.parse_args(argv)
 
     here = Path(__file__).resolve().parent
@@ -529,7 +541,17 @@ def main(argv=None) -> int:
                          platform=fixture.get("platform", ""),
                          contract_version=fixture.get("contractVersion", ""),
                          cases_total=len(cases))
-    return 1 if any(r.status == "fail" for r in results) else 0
+    if any(r.status == "fail" for r in results):
+        return 1
+    skipped = [r for r in results if r.status == "skip"]
+    if skipped and args.fail_on_skip:
+        print(
+            "[一致性套件] 有 " + str(len(skipped)) + " 条用例被跳过（--fail-on-skip 下按失败处理）："
+            + "; ".join(str(r.case_id) + "：" + str(getattr(r, "skip_reason", "")) for r in skipped),
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

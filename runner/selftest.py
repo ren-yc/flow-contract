@@ -120,6 +120,9 @@ check("没有群主被拦（0 同样是缺陷）", run("isOwner_exactly_one", ct
 b = envelope()
 b["members"][0].pop("isOwner")
 check("没有 isOwner 键也被拦", run("isOwner_exactly_one", ctx_with(b)) is not None)
+b = envelope()
+b["members"].append({"platformId": "M2", "accountName": "乙", "groupNickname": "", "isOwner": False})
+check("两成员恰一真通过（正常形状）", run("isOwner_exactly_one", ctx_with(b)) is None)
 
 
 print("补：其余不变量（该过的过、该拦的拦）")
