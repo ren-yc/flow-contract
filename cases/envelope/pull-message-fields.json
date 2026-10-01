@@ -4,7 +4,7 @@
   "requires": [
     "slot:group_with_messages"
   ],
-  "note": "消息的 id、时间戳量级与单调性、类型合法、content 键必须存在",
+  "note": "消息的 id、时间戳量级与单调性、类型合法、content 键必须存在；媒体是 {type, fileName, md5} 形状",
   "ops": [
     {
       "req": {
@@ -18,7 +18,8 @@
         "platformMessageId_string_unique_stable",
         "timestamps_non_decreasing_seconds",
         "type_in_subset_never_6",
-        "content_key_present"
+        "content_key_present",
+        "media_shape_in_pull"
       ]
     }
   ]

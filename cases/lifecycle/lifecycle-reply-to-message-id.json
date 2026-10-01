@@ -4,7 +4,7 @@
   "requires": [
     "slot:group_with_messages"
   ],
-  "note": "引用字段出现即字符串，绝不出现空值",
+  "note": "引用字段出现即字符串，绝不出现空值；原生面、消息面、拉取面三个面同规",
   "ops": [
     {
       "req": {
@@ -17,6 +17,32 @@
       "assert": [
         "replyToMessageId_is_string_never_null",
         "replyToMessageId_reference_valid"
+      ]
+    },
+    {
+      "req": {
+        "GET": "{endpoints.messages}",
+        "slot": "group_with_messages",
+        "query": {
+          "talker": "{slot:group_with_messages}",
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "replyToMessageId_is_string_never_null"
+      ]
+    },
+    {
+      "req": {
+        "GET": "{endpoints.messages_chatlab}",
+        "slot": "group_with_messages",
+        "query": {
+          "talker": "{slot:group_with_messages}",
+          "limit": "20"
+        }
+      },
+      "assert": [
+        "replyToMessageId_is_string_never_null"
       ]
     }
   ]

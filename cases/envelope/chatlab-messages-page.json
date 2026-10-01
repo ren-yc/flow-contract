@@ -1,0 +1,42 @@
+{
+  "id": "chatlab-messages-page",
+  "group": "envelope",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "消息面信封：talker/count/page 齐全且无 success；media 形状；nextCursor 续页不重不丢",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.messages_chatlab}",
+        "slot": "group_with_messages",
+        "query": {
+          "talker": "{slot:group_with_messages}",
+          "limit": "1"
+        }
+      },
+      "save": {
+        "c1": "page.nextCursor"
+      },
+      "assert": [
+        "chatlab_envelope_page_keys",
+        "media_shape_in_pull"
+      ]
+    },
+    {
+      "req": {
+        "GET": "{endpoints.messages_chatlab}",
+        "slot": "group_with_messages",
+        "query": {
+          "talker": "{slot:group_with_messages}",
+          "limit": "1",
+          "cursor": "{c1}"
+        }
+      },
+      "assert": [
+        "chatlab_envelope_page_keys",
+        "cursor_exclusive_no_gap_no_dup"
+      ]
+    }
+  ]
+}

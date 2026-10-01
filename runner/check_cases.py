@@ -39,8 +39,11 @@ COND_RE = re.compile(r"^\s*([A-Za-z0-9_.]+)\s*==\s*(true|false|null|-?[0-9]+|\"[
 def main() -> int:
     csch = json.loads((ROOT / "schema/case.schema.json").read_text(encoding="utf-8"))
     fsch = json.loads((ROOT / "schema/fixture.schema.json").read_text(encoding="utf-8"))
-    # 夹具里允许出现的能力名：schema 的必填项加上示例中出现的可选项。
-    known_caps = set(fsch["properties"]["capabilities"]["required"]) | {"groupNickname", "authProbe"}
+    # 夹具里允许出现的能力名 = schema 的**能力词表**（properties）＋必填项。
+    # 不能只从 `required` 推导：`required` 表达的是「每个夹具都必须声明哪些」，
+    # 而用例可以点名**可选**能力（缺声明的仓库按 requires 跳过）—— 两者是不同的集合。
+    caps_schema = fsch["properties"]["capabilities"]
+    known_caps = set(caps_schema.get("properties", {})) | set(caps_schema["required"])
     # 必填核心端点 + 两个「schema 不强制、但用例可以引用」的可选端点：
     # `harness` 是控制面；`group-members` 是群主断言的落点（缺它的夹具会按 requires 跳过）。
     known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members"}

@@ -37,6 +37,7 @@
         "sessions",
         "pull",
         "messages",
+        "messages_chatlab",
         "contacts",
         "push"
       ],
@@ -69,23 +70,46 @@
     },
     "capabilities": {
       "type": "object",
-      "description": "「能力存在性差异」的机器可读载体；缺失的能力由用例 skip 而非 fail。\n\n`pullDiscovery` / `pullNotification` 门控的是 **Pull 形状**的发现与通知面（规范里的 `GET {baseUrl}/sessions` 与 `GET {baseUrl}/push/messages`）：两仓库当前只在各自的 `/api/v1/*` 上提供等价能力，Pull 形状的路由尚未实现，因此置 false；实现后翻成 true 即可启用相关用例。",
+      "description": "「能力存在性差异」的机器可读载体；缺失的能力由用例 skip 而非 fail。\n\nrequired 只列「每个夹具都必须声明」的那一项（sns 是本项目唯一独有的面）；其余能力是可选开关，由各仓库按实际支持情况声明 —— 词表见本节点的 properties（用例只能点名词表里的名字，因此词表必须独立于 required 存在）。\n\npullDiscovery / pullNotification 门控的是 ChatLab 形状的发现与通知面（/chatlab/sessions 与 /chatlab/push/messages）：未实现的一端置 false，相关用例随之跳过。",
       "required": [
-        "mediaById",
-        "sns",
-        "memberCount",
-        "pullDiscovery",
-        "pullNotification",
-        "roles",
-        "sse"
+        "sns"
       ],
+      "properties": {
+        "mediaById": {
+          "type": "boolean"
+        },
+        "sns": {
+          "type": "boolean"
+        },
+        "memberCount": {
+          "type": "boolean"
+        },
+        "pullDiscovery": {
+          "type": "boolean"
+        },
+        "pullNotification": {
+          "type": "boolean"
+        },
+        "roles": {
+          "type": "boolean"
+        },
+        "sse": {
+          "type": "boolean"
+        },
+        "groupNickname": {
+          "type": "boolean"
+        },
+        "authProbe": {
+          "type": "boolean"
+        }
+      },
       "additionalProperties": {
         "type": "boolean"
       }
     },
     "authProbed": {
       "type": "object",
-      "description": "五通道鉴权探测结果：传输名 → HTTP 状态码。由 harness 生成（需要真实服务），缺失时相关用例会 skip。",
+      "description": "鉴权通道探测结果：传输名 → HTTP 状态码（当前两条：bearer 与 access_token）。由 harness 生成（需要真实服务），缺失时相关用例会 skip。",
       "additionalProperties": {
         "type": "integer"
       }

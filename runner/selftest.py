@@ -175,10 +175,10 @@ c = ctx_with(envelope(), variables={"watermark": 1790000000})
 check("增量只含新消息时通过", run("incremental_only_new", c) is None)
 
 c = ctx_with({})
-c.fixture["authProbed"] = {"bearer": 200, "x-api-key": 200, "access_token": 200, "token": 200, "body": 200}
-check("五通道全 200 时通过", run("auth_transports_matrix", c) is None)
+c.fixture["authProbed"] = {"bearer": 200, "access_token": 200}
+check("两条通道全 200 时通过", run("auth_transports_matrix", c) is None)
 c = ctx_with({})
-c.fixture["authProbed"] = {"bearer": 200, "body": 401}
+c.fixture["authProbed"] = {"bearer": 200, "access_token": 401}
 check("有一条通道没返回 200 被拦", run("auth_transports_matrix", c) is not None)
 
 c = ctx_with({})
@@ -186,6 +186,58 @@ c.last_event = {"generation": 3, "watermarks": []}
 check("注销基线带 generation 时通过", run("deregister_replay_consistent", c) is None)
 c.last_event = {"watermarks": []}
 check("注销基线缺 generation 被拦", run("deregister_replay_consistent", c) is not None)
+
+print("F 组：消息面信封与媒体形状")
+
+
+def page_body(**over):
+    body = {
+        "talker": "G1",
+        "count": 1,
+        "page": {"hasMore": True, "nextCursor": "1"},
+        "messages": [{"platformMessageId": "P1", "sender": "M1", "timestamp": 1790000001, "type": 1,
+                      "content": "hi", "media": {"type": "image", "fileName": "a.jpg", "md5": "aa"}}],
+    }
+    body.update(over)
+    return body
+
+
+c = ctx_with(page_body())
+for n in ("chatlab_envelope_page_keys", "media_shape_in_pull"):
+    check(n + " 通过合法响应", run(n, c) is None)
+
+check("信封里出现 success 被拦",
+      run("chatlab_envelope_page_keys", ctx_with(page_body(success=True))) is not None)
+check("count 与本页条数不一致被拦",
+      run("chatlab_envelope_page_keys", ctx_with(page_body(count=3))) is not None)
+check("缺 page 块被拦",
+      run("chatlab_envelope_page_keys", ctx_with(page_body(page=None))) is not None)
+check("hasMore 为真却没有 nextCursor 被拦",
+      run("chatlab_envelope_page_keys",
+          ctx_with(page_body(page={"hasMore": True, "nextCursor": None}))) is not None)
+check("排空后 nextCursor 非 null 被拦",
+      run("chatlab_envelope_page_keys",
+          ctx_with(page_body(page={"hasMore": False, "nextCursor": "1"}))) is not None)
+check("排空后 nextCursor 为 null 时通过",
+      run("chatlab_envelope_page_keys",
+          ctx_with(page_body(page={"hasMore": False, "nextCursor": None}))) is None)
+
+b = page_body()
+b["messages"][0]["media"] = {"type": "image", "fileName": "a.jpg", "md5": None}
+check("media.md5 为 null 被拦", run("media_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0]["media"] = {"type": "image", "fileName": "a.jpg", "size": 12}
+check("media 多出未约定的键被拦", run("media_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0]["media"] = None
+check("media 为 null 被拦（无媒体应省略整键）", run("media_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0].pop("media")
+check("无 media 键时通过", run("media_shape_in_pull", ctx_with(b)) is None)
+b = page_body()
+b["messages"][0]["media"] = {"type": "image", "fileName": ""}
+check("fileName 为空串时通过（没有名字不等于形状错）",
+      run("media_shape_in_pull", ctx_with(b)) is None)
 
 print("未登记的名字必须被报出")
 check("unknown() 能报出未登记项", inv.unknown(["envelope_five_blocks", "no_such_one"]) == ["no_such_one"])

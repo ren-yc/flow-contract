@@ -297,6 +297,36 @@ def _no_media_path(ctx: Ctx) -> str | None:
     return None
 
 
+@invariant("media_shape_in_pull", "media 出现时是 {type, fileName, md5}，无媒体省略整键、md5 取不到省略该键")
+def _media_shape(ctx: Ctx) -> str | None:
+    # 两个面共用这一个 media 对象（拉取面与消息面各点名一次本不变量），
+    # 于是「只有一面悄悄改了形状」也会在另一面暴露出来。
+    #
+    # fileName **允许空串**：它是元数据，不承诺字节可取（能否取到取决于是否真的落盘）；
+    # 但**不允许 null** —— 空串是「没有名字」的既有表达，null 会让按类型读取的下游当场炸。
+    allowed = {"type", "fileName", "md5"}
+    for m in _messages(ctx):
+        if "media" not in m:
+            continue
+        media = m.get("media")
+        if not isinstance(media, dict):
+            return f"media 出现时必须是对象（无媒体应省略整个键），实际 {media!r}"
+        extra = sorted(set(media) - allowed)
+        if extra:
+            return f"media 只应有 {sorted(allowed)}，多出 {extra}"
+        t = media.get("type")
+        if not isinstance(t, str) or not t:
+            return f"media.type 应为非空字符串，实际 {t!r}"
+        name = media.get("fileName")
+        if not isinstance(name, str):
+            return f"media.fileName 应为字符串（没有名字时给空串），实际 {name!r}"
+        if "md5" in media:
+            v = media["md5"]
+            if not isinstance(v, str) or not v:
+                return f"media.md5 出现时应为非空字符串，实际 {v!r}"
+    return None
+
+
 # ── C 组：发现端点 ──
 
 @invariant("discovery_shape", "会话项字段齐全，且 type 是 group/private")
@@ -476,13 +506,16 @@ def _incremental(ctx: Ctx) -> str | None:
 
 # ── D 组：鉴权 ──
 
-@invariant("auth_transports_matrix", "五种传输方式等价（都返回成功）")
+@invariant("auth_transports_matrix", "两条传输方式等价（都返回成功）")
 def _auth_matrix(ctx: Ctx) -> str | None:
-    # 探测结果由**夹具**提供：五通道各发一次请求是具身动作（需要真实服务与令牌），
+    # 探测结果由**夹具**提供：每条通道各发一次请求是具身动作（需要真实服务与令牌），
     # 不该由执行器反复试探；夹具没做探测时用例会先 skip 掉。
+    #
+    # 通道词表只剩两条（Authorization: Bearer 与 ?access_token=）：其余写法已被删除，
+    # 夹具若仍探测它们，得到的是 401 —— 与「通道还在」无法区分，所以夹具也必须只探测这两条。
     results = ctx.fixture.get("authProbed")
     if not results:
-        return "夹具没有提供五通道的探测结果（authProbed）"
+        return "夹具没有提供鉴权通道的探测结果（authProbed）"
     bad = [k for k, v in results.items() if v != 200]
     if bad:
         return f"这些传输方式没有返回 200：{bad}"
@@ -507,7 +540,7 @@ def _is_owner(ctx: Ctx) -> str | None:
     # 断言面是 group-members（两仓的该面都带 isOwner 键且数据源已接真）。
     #
     # **前置条件（用例侧声明，这里如实写明）**：本断言要求夹具**确实提供群主数据**，
-    # 且群主落在该群的发言者集合里（group-members 返回的是发言者）。
+    # 且群主落在该面返回的成员集合里（该面返回名册 ∪ 本页发言人）。
     # 服务端**合法的降级形态**——群主不在本页、或缺 group_info.db / chat_room 表——
     # 会返回合理的全 false，而本断言**并不知道自己拿到的是哪种数据**：它不会跳过，
     # 只会判红。也就是说降级形态的覆盖在**各仓自己的 golden 快照与真库探针**那里，
@@ -595,4 +628,39 @@ def _deregister_replay(ctx: Ctx) -> str | None:
         return "没有拿到任何事件：该断言需要先订阅再注销"
     if "generation" not in ev:
         return f"注销后的基线事件应带 generation，实际 {ev!r}"
+    return None
+
+
+# ── F 组：消息面（ChatLab 形状的新挂载点）──
+
+@invariant("chatlab_envelope_page_keys", "消息面信封：talker/count/page 齐全、无 success，count 等于本页条数")
+def _chatlab_page_keys(ctx: Ctx) -> str | None:
+    # 这条面**刻意不带 success**：它输出的是数据信封，而 success 是「操作结果」的语言，
+    # 两者混在一起时读者无法判断 page/count 是否可信。拉取面同样没有 success。
+    body = ctx.body
+    if not isinstance(body, dict):
+        return f"响应应为对象，实际 {type(body).__name__}"
+    if "success" in body:
+        return "该面不该出现 success：它是操作结果的语言，与数据信封的 page/count 混在一起会让读者猜哪个为准"
+    talker = body.get("talker")
+    if not isinstance(talker, str) or not talker:
+        return f"talker 应为非空字符串（回显请求的会话），实际 {talker!r}"
+    n = _int(body.get("count"))
+    if n is None or n < 0:
+        return f"count 应为非负整数，实际 {body.get('count')!r}"
+    got = len(_messages(ctx))
+    if n != got:
+        return f"count={n} 与本页消息数 {got} 不一致：它是**本页条数**，不是总数（分页信息在 page 里）"
+    page = body.get("page")
+    if not isinstance(page, dict):
+        return f"page 应为对象（翻页信息恒出现），实际 {page!r}"
+    more = page.get("hasMore")
+    if not isinstance(more, bool):
+        return f"page.hasMore 应为布尔，实际 {more!r}"
+    nxt = page.get("nextCursor")
+    if more:
+        if not isinstance(nxt, str) or not nxt:
+            return f"hasMore 为真时 nextCursor 应为非空字符串（调用方只能靠它续页），实际 {nxt!r}"
+    elif nxt is not None:
+        return f"排空后 nextCursor 应为 null，实际 {nxt!r}（非 null 会让调用方再翻一页）"
     return None

@@ -1,0 +1,15 @@
+{
+  "id": "auth-two-transports-equivalent",
+  "group": "auth",
+  "requires": [
+    "capability:authProbe"
+  ],
+  "note": "两条鉴权通道（Authorization: Bearer 与查询参数 access_token）等价；夹具没做探测时跳过",
+  "ops": [
+    {
+      "assert": [
+        "auth_transports_matrix"
+      ]
+    }
+  ]
+}
