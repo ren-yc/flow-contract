@@ -1,0 +1,67 @@
+{
+  "id": "sse-deregister-replay-with-old-id",
+  "group": "lifecycle",
+  "requires": [
+    "capability:sse",
+    "capability:pullNotification"
+  ],
+  "note": "注销前记住最后事件号，注销后带着它重连：拿到的必须是带代号的基线，而不是旧账号的事件或任何历史事件",
+  "ops": [
+    {
+      "sse_open": {
+        "endpoint": "push",
+        "as": "s"
+      }
+    },
+    {
+      "sse_expect": {
+        "event": "sync",
+        "within_s": 45,
+        "as": "s",
+        "save": {
+          "old_id": "$event_id"
+        }
+      }
+    },
+    {
+      "call": "harness.deregister"
+    },
+    {
+      "sse_expect": {
+        "event": "sync",
+        "within_s": 45,
+        "assert": [
+          "deregister_replay_consistent"
+        ],
+        "as": "s"
+      }
+    },
+    {
+      "sse_close": {
+        "as": "s"
+      }
+    },
+    {
+      "sse_open": {
+        "endpoint": "push",
+        "as": "s",
+        "last_event_id": "{old_id}"
+      }
+    },
+    {
+      "sse_expect": {
+        "event": "sync",
+        "within_s": 45,
+        "assert": [
+          "deregister_replay_consistent"
+        ],
+        "as": "s"
+      }
+    },
+    {
+      "sse_close": {
+        "as": "s"
+      }
+    }
+  ]
+}

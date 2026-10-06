@@ -1,0 +1,56 @@
+{
+  "id": "cursor-offset-since-id-set-equals-tail",
+  "group": "cursor",
+  "requires": [
+    "slot:group_with_messages"
+  ],
+  "note": "offset+since 叠加取到的 id 集合，必须等于「同 since 全量集合去掉前 offset 条」——叠加不是两个独立过滤器的交集，也不是并集",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "0",
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "full_ids": "$ids"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "0",
+          "offset": "1",
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "tail_ids": "$ids"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "since": "0",
+          "offset": "1",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "window_ids": "$ids"
+      }
+    },
+    {
+      "assert": [
+        "offset_since_id_set_matches_tail"
+      ]
+    }
+  ]
+}

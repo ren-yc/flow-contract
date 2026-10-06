@@ -664,3 +664,25 @@ def _chatlab_page_keys(ctx: Ctx) -> str | None:
     elif nxt is not None:
         return f"排空后 nextCursor 应为 null，实际 {nxt!r}（非 null 会让调用方再翻一页）"
     return None
+
+
+@invariant(
+    "offset_since_id_set_matches_tail",
+    "offset+since 叠加取到的 id 集合 = 同 since 全量集合去掉前 offset 条（窗口取前 limit 条）"
+)
+def _offset_since_id_set(ctx: Ctx) -> str | None:
+    full = ctx.variables.get("full_ids")
+    tail = ctx.variables.get("tail_ids")
+    window = ctx.variables.get("window_ids")
+    if not isinstance(full, list) or not isinstance(tail, list) or not isinstance(window, list):
+        return "三个 id 集合必须都是列表"
+    # 叠加的正确形状：tail == full[1:]；window == full[1:1+len(window)]。
+    # 任何一个等式破坏都说明 offset 没有作用在 since 过滤后的同一序列上
+    # （跳条、重发、或两个参数互相覆盖）。
+    if [str(x) for x in tail] != [str(x) for x in full][1:]:
+        return "offset=1 的集合与全量去掉第一条不一致（重发或跳条）"
+    w = [str(x) for x in window]
+    expect = [str(x) for x in full][1:1 + len(w)]
+    if w != expect:
+        return "小页窗口的 id 序列与全量去掉第一条后的前缀不一致：got=" + repr(w[:6]) + " expect=" + repr(expect[:6])
+    return None

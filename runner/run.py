@@ -164,8 +164,15 @@ def sse_open(ctx, op, token: str | None):
     path = table[name]
     if token:
         path = path + "?" + urllib.parse.urlencode({"access_token": token})
+    headers = {"Accept": "text/event-stream"}
+    # `last_event_id` 可以是字面量，也可以是 "{var}" 形式的变量引用（比如注销前
+    # 存下的最后事件号）：重放语义的用例必须能带着旧游标重连，否则「旧游标 + 注销」
+    # 的组合永远测不到。
+    last_id = spec.get("last_event_id")
+    if last_id is not None:
+        headers["Last-Event-ID"] = resolve(str(last_id), ctx)
     conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=60)
-    conn.request("GET", path, headers={"Accept": "text/event-stream"})
+    conn.request("GET", path, headers=headers)
     resp = conn.getresponse()
     handle = spec.get("as", "stream")
     ctx.streams[handle] = (conn, resp)
@@ -181,6 +188,7 @@ def _read_event(resp, within_s: float):
     import time
     deadline = time.time() + within_s
     event = None
+    event_id = None
     data_lines: list[str] = []
     while time.time() < deadline:
         line = resp.readline()
@@ -189,15 +197,18 @@ def _read_event(resp, within_s: float):
         text = line.decode("utf-8", "replace").rstrip("\r\n")
         if text == "":
             if event or data_lines:
-                return event or "message", "\n".join(data_lines)
+                # `id:` 行与事件一起返回：重放语义的用例要把它存下来当重连游标。
+                return event or "message", "\n".join(data_lines), event_id
             continue
         if text.startswith(":"):
             continue
         if text.startswith("event:"):
             event = text[6:].strip()
+        elif text.startswith("id:"):
+            event_id = text[3:].strip()
         elif text.startswith("data:"):
             data_lines.append(text[5:].strip())
-    return None, None
+    return None, None, None
 
 
 def sse_expect(ctx, op):
@@ -234,7 +245,7 @@ def sse_expect(ctx, op):
                 + repr(skipped[:10])
                 + "）"
             )
-        name, data = _read_event(resp, remaining)
+        name, data, event_id = _read_event(resp, remaining)
         if name is None:
             raise SetupError(
                 "在 "
@@ -256,6 +267,16 @@ def sse_expect(ctx, op):
         raise SetupError("事件 " + name + " 的 data 不是 JSON：" + data[:200]) from None
     ctx.last_event = ctx.body if isinstance(ctx.body, dict) else None
     ctx.status = 200
+    # `save` 的键落到变量表：`$event_id` 哨兵存本帧的 SSE id（重连游标），
+    # 其余键按 dig 路径从事件体取。
+    for var, path in (spec.get("save") or {}).items():
+        if path == "$event_id":
+            ctx.variables[var] = event_id
+            continue
+        try:
+            ctx.variables[var] = dig(ctx.body, path)
+        except KeyError:
+            pass
     return name
 
 
