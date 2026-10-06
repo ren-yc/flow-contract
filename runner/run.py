@@ -170,7 +170,13 @@ def sse_open(ctx, op, token: str | None):
     # 的组合永远测不到。
     last_id = spec.get("last_event_id")
     if last_id is not None:
-        headers["Last-Event-ID"] = resolve(str(last_id), ctx)
+        resolved_id = resolve(str(last_id), ctx)
+        # 哨兵存到的是 None（匹配帧没有 id: 行、且此前跳过的帧也没有）时，
+        # 发出字面头 "Last-Event-ID: None" 是静默错游标 —— 响亮失败而不是让
+        # 用例带着一个必错的游标跑。
+        if resolved_id == "None":
+            raise SetupError("重连游标为 None：匹配帧与其前所有帧都没有 id: 行，无法回放")
+        headers["Last-Event-ID"] = resolved_id
     conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=60)
     conn.request("GET", path, headers=headers)
     resp = conn.getresponse()
@@ -231,6 +237,9 @@ def sse_expect(ctx, op):
     import time
     deadline = time.time() + float(spec["within_s"])
     skipped: list[str] = []
+    # SSE 的 id 是**连接级游标**：「最后见到的 id」才算数 —— 匹配帧自己没有
+    # `id:` 行时，此前跳过帧带过的 id 仍是客户端会保留的那个。
+    last_seen_id = None
     while True:
         remaining = deadline - time.time()
         if remaining <= 0:
@@ -261,6 +270,8 @@ def sse_expect(ctx, op):
         if name == spec["event"]:
             break
         skipped.append(name)
+        if event_id is not None:
+            last_seen_id = event_id
     try:
         ctx.body = json.loads(data) if data else None
     except json.JSONDecodeError:
@@ -271,7 +282,9 @@ def sse_expect(ctx, op):
     # 其余键按 dig 路径从事件体取。
     for var, path in (spec.get("save") or {}).items():
         if path == "$event_id":
-            ctx.variables[var] = event_id
+            # 匹配帧无 id 时回退到「最后见到的 id」——SSE 客户端语义就是这样
+            # 保留游标的；两者都没有才存 None（后续 sse_open 的 None 守卫会响亮报错）。
+            ctx.variables[var] = event_id if event_id is not None else last_seen_id
             continue
         try:
             ctx.variables[var] = dig(ctx.body, path)

@@ -197,10 +197,6 @@
        "minimum": 1,
        "description": "超时秒数；超时即失败（不静默跳过）"
       },
-      "lastEventId": {
-       "$ref": "#/$defs/varRef",
-       "description": "带此值重连，用于验证断线重放"
-      },
       "assert": {
        "type": "array",
        "minItems": 1,
