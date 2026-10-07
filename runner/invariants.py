@@ -326,6 +326,23 @@ def _media_shape(ctx: Ctx) -> str | None:
                 return f"media.md5 出现时应为非空字符串，实际 {v!r}"
     return None
 
+@invariant("media_id_shape_in_pull", "mediaId 出现时是非空字符串，且 media 键必须同时存在")
+def _media_id_shape(ctx: Ctx) -> str | None:
+    # 句柄在**消息这一层**而不在 media 对象里：media 的键集由 media_shape_in_pull 钉死为
+    # {type, fileName, md5}（它拒绝任何多余键），把句柄塞进去会被那条不变量直接判红。
+    # 本条管的是消息层的 mediaId 本身：
+    #   · 出现即必须是**非空字符串**——「取不到」的表达方式是省略整键；给 null 或空串会让
+    #     按类型读取的下游当场炸，而空句柄更糟：调用方会拿它去拼请求。
+    #   · 有句柄就必须同时有 media 键：「这条媒体取得到字节」而「这条消息没有媒体」是矛盾态。
+    for m in _messages(ctx):
+        if "mediaId" not in m:
+            continue
+        v = m["mediaId"]
+        if isinstance(v, bool) or not isinstance(v, str) or not v:
+            return f"mediaId 出现时应为非空字符串（不承诺时省略整键，而不是 null/空串），实际 {v!r}"
+        if "media" not in m:
+            return f"消息带着 mediaId 却没有 media 键（声称取得到字节的媒体不存在）：{m!r}"
+    return None
 
 # ── C 组：发现端点 ──
 

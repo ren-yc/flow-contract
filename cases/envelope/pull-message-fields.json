@@ -19,7 +19,8 @@
         "timestamps_non_decreasing_seconds",
         "type_in_subset_never_6",
         "content_key_present",
-        "media_shape_in_pull"
+        "media_shape_in_pull",
+        "media_id_shape_in_pull"
       ]
     }
   ]

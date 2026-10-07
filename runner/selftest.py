@@ -239,6 +239,27 @@ b["messages"][0]["media"] = {"type": "image", "fileName": ""}
 check("fileName 为空串时通过（没有名字不等于形状错）",
       run("media_shape_in_pull", ctx_with(b)) is None)
 
+print("mediaId 的键集与值形")
+b = page_body()
+b["messages"][0]["mediaId"] = "deadbeef.jpg"
+check("mediaId 与非空 media 键并存时通过", run("media_id_shape_in_pull", ctx_with(b)) is None)
+b = page_body()
+check("不带 mediaId 时通过（可选键）", run("media_id_shape_in_pull", ctx_with(b)) is None)
+b = page_body()
+b["messages"][0]["mediaId"] = None
+check("mediaId 为 null 被拦（应省略整键）", run("media_id_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0]["mediaId"] = ""
+check("mediaId 为空串被拦", run("media_id_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0]["mediaId"] = True
+check("mediaId 为 bool 被拦（bool 是 int 子类、也要挡）", run("media_id_shape_in_pull", ctx_with(b)) is not None)
+b = page_body()
+b["messages"][0].pop("media")
+b["messages"][0]["mediaId"] = "x.jpg"
+check("有 mediaId 却无 media 键被拦（矛盾态）", run("media_id_shape_in_pull", ctx_with(b)) is not None)
+
+
 print("未登记的名字必须被报出")
 check("unknown() 能报出未登记项", inv.unknown(["envelope_five_blocks", "no_such_one"]) == ["no_such_one"])
 
