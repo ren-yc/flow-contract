@@ -158,13 +158,16 @@
 
 ## 10. accounts 响应的 `progress` 是 additive 可选对象
 
-**问题**：建索引进度此前不可观察 —— `POST /api/v1/accounts`（受理与幂等命中）与
-`GET /api/v1/accounts` 只能看到 `indexing` 这个词，客户端无法回答「还要等多久」。
+**问题**：建索引进度此前不可观察 —— accounts 的受理/幂等/列表响应与冲突体里
+只能看到 `indexing` 这个词，客户端无法回答「还要等多久」。
 
 **选择**：
 
-- 在上述三处响应里新增**可选对象** `progress`，键为 `tables_done`、`tables_total`、
-  `messages_indexed`；
+- 在**四处**响应里新增**可选对象** `progress`，键为 `tables_done`、`tables_total`、
+  `messages_indexed`：① 受理（`accepted`）；② 幂等命中（`already_ready` /
+  `in_progress`）；③ 账号明细列表（`GET /api/v1/accounts` 的列表项）；④ 冲突体
+  （`account_conflict`，仅当**在位**账号正在 `indexing` 时携带——被拒的调用方同样
+  需要知道「还要等多久」才不该反复重试）。
 - 只在账号状态为 `indexing` 时出现；`ready` / `awaiting_key` / `error` 等其余状态
   **整个键省略**，不给 `null`，也不给全零对象；
 - **additive**：不改变任何既有键的含义或形状，不读它的客户端零感知；
