@@ -16,7 +16,7 @@
   `sns_json_export_carries_content_desc_the_html_export_must_read`、
   `sns_json_export_drops_credential_media_keys`；qqflow 无对应面（缺失本身就是断言）。
 
-## 2. `messageCount` 是 qqflow 的条件键
+## 2. `messageCount` 是 qqflow 群成员面的条件键
 
 - **差异**：qqflow 的 `group-members` 只在 `includeMessageCounts=1` 时给 `messageCount`；
   不带时**整个键省略**（不是 0）。weflow 的群成员面恒给计数。
