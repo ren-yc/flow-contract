@@ -64,6 +64,55 @@
 - **回归位置**：文档组织无自动化判据——两仓 `tests/docs_anchors.rs` 只保证**各自**锚点有效
   （含跨文件锚），不保证两仓骨架一致；跨仓引用只用「文件名＋语义标题」，不用编号。
 
+## 7. 「不存在」与「存在但没有内容」：按面各自定型
+
+- **差异**：两仓对「这个对象根本不在索引里」与「在，但一条内容都没有」都区分，但各面的
+  取向由它自己的数据来源决定：
+  - 消息面（`GET /api/v1/messages`、`GET /chatlab/messages`）：weflow 对未知会话返回 404
+    统一信封，对「会话列表里有它、但一条消息都没索引到」返回 200 空页（`count:0`；判据是
+    会话名册 ∪ 消息索引的并集；与群成员面的 404 守卫同批落地，此前这类会话一并 404）。
+    qqflow 对未知 talker 返回 **200 空列表**（查不到会话直接交空页；参数校验只验
+    `talker` 非空）——这是本节登记的**长期保留差异**：qqflow 的会话条目只由消息记录建立，
+    没有「名册里有、内容为零」的输入形态，翻转它在它一侧结构上不可表达。
+  - 拉取面（`GET /api/v1/sessions/{id}/messages`）：两仓一致，未知会话一律 404（套件用例
+    钉住）。
+  - 群成员面（`GET /api/v1/group-members`）：两仓一致，未知群号一律 404（weflow 的 404 守卫
+    与「空会话 200 空页」同批落地；此前 weflow 该面不做存在性判定、未知群返回 200 空成员表）。
+- **失败模式**：把「404」当致命错误的代码，在 qqflow 的消息面探测会话存在性时会静默得到
+  空页；把「200 空列表」当「会话不存在」的判空，在 weflow 的消息面走不到那个分支（404 直接
+  抛错）。唯一安全的跨仓写法是**先问名册面**（`/api/v1/sessions` 的 `messageCount`、群成员面
+  的 404），再按内容面的 `count`/`hasMore` 读内容，不拿状态码当「有没有内容」的判据。
+- **回归位置**：weflow `tests/api_smoke.rs::messages_contract`（未知会话 404）、
+  `a_listed_session_without_messages_answers_an_empty_page`（列表里有、内容零条 ⇒ 200 空页，
+  与守卫同批补）、`group_members_rejects_an_unknown_chatroom`（未知群 404，同批补）；qqflow
+  `tests/api_smoke.rs::wrong_talker_returns_empty`（未知 talker ⇒ 空页）、群成员面 404 分支
+  （`group_members.rs` 的「群聊不存在」；用例随 pin 升级同批补）。拉取面由用例
+  `cursor-unknown-session-404` 与不变量 `unknown_session_404_envelope` 两仓共同钉住。
+
+## 8. 同一个查询参数在两仓写法不同（群成员面的键名与布尔取值）
+
+- **差异**：
+  - 会话标识的键名：weflow 的 `GET /api/v1/group-members` **同时**接受 `chatroomId` 与
+    `talker`（先取前者、再回落后者），参数面是未定型 map，未知键被忽略。qqflow 用类型化
+    参数结构，键名 serde `camelCase`，只认 `chatroomId`／`includeMessageCounts`。
+  - 后果是**报错形态**不同：qqflow 收到 snake_case 的 `chatroom_id` 不会说「参数名不对」，
+    必填键保持缺席，得到 400「缺少必填参数 chatroomId」。
+  - 布尔取值：weflow 认 `1/true/yes/on`，qqflow 只认 `1/true`。`media=yes` 在 qqflow 侧为假。
+  - 媒体类型开关的**方向**相反：qqflow 五个开关是退出制（不传＝开，`image=0` 才关）；
+    weflow 是请求制（`media=1` 不带子开关＝四类都要，带任一子开关＝只给白名单里的那些，
+    文件附件两仓都不进导出）。
+- **失败模式**：跨仓复用同一段请求构造代码时三种静默：snake_case 一侧收到 400 而它以为
+  「参数被忽略了」；`yes` 一侧开关没生效、请求按默认形状返回；退出制一侧把「只要图片」写成
+  别的形态，结果是全量导出。三者都不会在响应里点名原因。
+- **回归位置**：weflow `tests/api_smoke.rs::sessions_contacts_group_members`（`chatroomId` 形态）、
+  `group_members_accepts_the_talker_alias`（别名等价，待补）、
+  `media_kind_whitelist_serves_only_requested_kinds`（请求制方向，待补）；qqflow
+  `tests/api_smoke.rs::contacts_and_group_members`（camelCase 必填）、
+  `group_members_rejects_a_snake_case_parameter_name`（snake_case 落 400，待补）、
+  `messages_media_kind_switches_and_removed_aliases`（退出制方向）。布尔取值与参数键名以
+  两仓 api 文档为准：weflow 见「通用查询参数」节与群成员参数行，qqflow 见各端点「参数」表
+  （如群成员面的 `includeMessageCounts` 行）。
+
 ---
 
 **维护规则**：新增/删除跨仓差异时，先改本文件，再在两仓 api 文档各加一行指针；
