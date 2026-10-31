@@ -75,5 +75,6 @@ flow-contract/
 ├─ spec/                # 上游规范原文快照
 ├─ cases/               # 断言用例（数据）
 ├─ schema/              # 用例与夹具的 JSON Schema
+├─ docs-common/         # 跨仓公共文档模板（发布手册）与样例变量
 └─ runner/              # 纯 stdlib Python 3，无第三方依赖
 ```
