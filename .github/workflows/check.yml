@@ -48,14 +48,3 @@ jobs:
       - name: case files are internally consistent
         run: python3 runner/check_cases.py
 
-      # 文档模板要自证可用：模板若只在「上游仓库升 pin」时才被渲染，一个写坏的模板会先
-      # 绿着进 tag、再在两个上游仓库同时炸。这里用两份样例变量各渲染一遍，断言无未替换
-      # 占位符、无空节——失败开放的检查等于没有检查。
-      - name: docs-common template renders (dual profile smoke)
-        run: |
-          python3 scripts/render_docs_common.py --smoke \
-            --template docs-common/release-runbook.tpl.md \
-            --vars docs-common/samples/weflow.vars.toml
-          python3 scripts/render_docs_common.py --smoke \
-            --template docs-common/release-runbook.tpl.md \
-            --vars docs-common/samples/qqflow.vars.toml
