@@ -73,6 +73,13 @@
     },
     "body": {
      "type": "object"
+    },
+    "expect": {
+     "enum": [
+      "json",
+      "bytes"
+     ],
+     "description": "期望的响应形态。缺省 json：拿到非 JSON（如 HTML 错误页）按环境错误响亮失败。bytes：声明本端点返回原始字节（媒体句柄等），非 JSON 响应交由字节类不变量判定，而不是被当成环境错误。"
     }
    },
    "patternProperties": {

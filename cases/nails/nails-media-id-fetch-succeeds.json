@@ -1,0 +1,22 @@
+{
+  "id": "nails-media-id-fetch-succeeds",
+  "group": "nails",
+  "requires": [
+    "capability:mediaById",
+    "endpoint:media",
+    "slot:exported_media"
+  ],
+  "note": "mediaId 出现 ⇒ 按它的值取字节必须成功：句柄是承诺不是尽力而为，404 或空体即承诺未兑现",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.media}",
+        "slot": "exported_media",
+        "expect": "bytes"
+      },
+      "assert": [
+        "media_fetch_bytes_nonempty"
+      ]
+    }
+  ]
+}

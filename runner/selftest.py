@@ -174,6 +174,71 @@ check("增量里出现旧消息被拦", run("incremental_only_new", c) is not No
 c = ctx_with(envelope(), variables={"watermark": 1790000000})
 check("增量只含新消息时通过", run("incremental_only_new", c) is None)
 
+print("B 组补：排空后追加可达（不透明进度游标）")
+c = ctx_with(envelope(), variables={"appended_id": "PA", "drained_ids": ["P1"], "continuation_ids": ["PA"]})
+check("排空后追加的消息可达时通过", run("cursor_progress_reaches_appended", c) is None)
+c = ctx_with(envelope(), variables={"appended_id": "PA", "drained_ids": ["P1"], "continuation_ids": []})
+check("追加消息不在续拉结果被拦", run("cursor_progress_reaches_appended", c) is not None)
+c = ctx_with(envelope())
+check("缺全部基准被拦", run("cursor_progress_reaches_appended", c) is not None)
+c = ctx_with(envelope(), variables={"drained_ids": ["P1"], "continuation_ids": ["PA"]})
+check("缺 appended_id 基准被拦", run("cursor_progress_reaches_appended", c) is not None)
+c = ctx_with(envelope(), variables={"appended_id": "PA", "drained_ids": [], "continuation_ids": []})
+check("排空基准为空被拦（两种世界不可区分）",
+      run("cursor_progress_reaches_appended", c) is not None)
+c = ctx_with(envelope(), variables={"appended_id": "P1", "drained_ids": ["P1"], "continuation_ids": ["P1"]})
+check("追加消息出现在排空基准里被拦（harness 注入失败）",
+      run("cursor_progress_reaches_appended", c) is not None)
+c = ctx_with(envelope(), variables={"appended_id": "PA", "drained_ids": ["P1"], "continuation_ids": ["PA", "P1"]})
+check("续拉重放排空前的旧页被拦", run("cursor_progress_reaches_appended", c) is not None)
+
+print("B 组补：排空后进度游标在场")
+c = ctx_with(envelope(sync={"hasMore": False, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": "opaque-1"}))
+check("排空后 nextCursor 非空时通过", run("opaque_cursor_presents_on_drain", c) is None)
+c = ctx_with(envelope())
+check("排空后 nextCursor 缺失被拦", run("opaque_cursor_presents_on_drain", c) is not None)
+c = ctx_with(envelope(sync={"hasMore": False, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": None}))
+check("排空后 nextCursor 为 null 被拦（消息面约定不可平移）",
+      run("opaque_cursor_presents_on_drain", c) is not None)
+c = ctx_with(envelope(sync={"hasMore": False, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": ""}))
+check("排空后 nextCursor 为空串被拦", run("opaque_cursor_presents_on_drain", c) is not None)
+
+print("媒体句柄取字节")
+c = ctx_with({})
+c.status = 200
+c.raw = b"\x00\x01\x02binary"
+c.response_content_type = "application/octet-stream"
+check("200 且非空字节时通过", run("media_fetch_bytes_nonempty", c) is None)
+c = ctx_with({})
+c.status = 404
+check("404 被拦（承诺未兑现）", run("media_fetch_bytes_nonempty", c) is not None)
+c = ctx_with({})
+c.status = 200
+c.response_content_type = "application/octet-stream"
+check("200 但空响应体被拦", run("media_fetch_bytes_nonempty", c) is not None)
+c = ctx_with({})
+c.status = 200
+c.raw = b'{"success": false}'
+c.response_content_type = "application/json"
+check("200 的 JSON 错误信封被拦（假通过防线）",
+      run("media_fetch_bytes_nonempty", c) is not None)
+c = ctx_with({})
+c.status = 200
+c.raw = b'{"success": false}'
+c.response_content_type = "text/plain"
+check("text/plain 包装的 JSON 信封也被拦（body 判据）",
+      run("media_fetch_bytes_nonempty", c) is not None)
+c = ctx_with({})
+c.status = 200
+c.raw = b"\x00\x01\x02binary"
+check("无 Content-Type 的非空字节通过（content-type 判据只拒 json）",
+      run("media_fetch_bytes_nonempty", c) is None)
+c = ctx_with({})
+c.status = 200
+c.raw = b"\x00\x01\x02binary"
+c.response_content_type = "application/octet-stream"
+check("octet-stream 字节时通过", run("media_fetch_bytes_nonempty", c) is None)
+
 c = ctx_with({})
 c.fixture["authProbed"] = {"bearer": 200, "access_token": 200}
 check("两条通道全 200 时通过", run("auth_transports_matrix", c) is None)
@@ -262,6 +327,170 @@ check("有 mediaId 却无 media 键被拦（矛盾态）", run("media_id_shape_i
 
 print("未登记的名字必须被报出")
 check("unknown() 能报出未登记项", inv.unknown(["envelope_five_blocks", "no_such_one"]) == ["no_such_one"])
+
+print("执行器端到端（桩 harness）：执行器少做一步时用例必须能看见")
+# 直接调不变量函数看不见执行器的缺陷——「call 分支丢回显」正是这样溜过两道门的。
+# 这里用桩 harness 走一遍完整的 run_case：断言两个世界的差异都被如实报告。
+import http.server
+import json
+import threading
+import run as runner_mod
+
+
+def _stub_body(**over):
+    """桩的固定 GET 响应：合法信封 + 进度游标在场（模拟已声明 opaqueCursor 的服务）。"""
+    body = envelope()
+    body["sync"] = {"hasMore": False, "nextSince": 1790000001, "nextOffset": 0,
+                    "nextCursor": "opaque-stub-1"}
+    body.update(over)
+    return body
+
+
+def _run_case_against_stub(case_ops, responses):
+    """对桩跑一条完整用例。responses：请求路径（不含查询串）→ 响应字典
+    （缺省 _stub_body），供各「坏世界」注入畸形响应。返回 (result, ctx)。"""
+
+    class _Stub(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            payload = json.loads(self.rfile.read(n))
+            out = {"success": True}
+            if payload.get("action") == "harness.append_message_at_cursor":
+                out["id"] = "PA"
+            body = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            spec = responses.get(self.path.split("?")[0], {})
+            if "raw" in spec:
+                body = spec["raw"]
+                ctype = spec.get("ctype", "application/octet-stream")
+                status = spec.get("status", 200)
+            else:
+                body = json.dumps(spec.get("body", _stub_body())).encode()
+                ctype = "application/json"
+                status = 200
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Stub)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        fx = {
+            "contractVersion": "0.9.0",
+            "platform": "wechat",
+            "endpoints": {"pull": "/pull", "harness": "/__harness", "media": "/media/{id}"},
+            "slots": {"exported_media": {"id": "whatever"}},
+            "capabilities": {"opaqueCursor": True, "mediaById": True},
+            "_base_url": "http://127.0.0.1:" + str(port),
+        }
+        ctx = inv.Ctx(fixture=fx, case={"id": "stub", "ops": case_ops})
+        for slot, spec in fx["slots"].items():
+            ctx.variables["slot:" + slot] = spec["id"]
+        return runner_mod.run_case({"id": "stub", "ops": case_ops}, ctx, None), ctx
+    finally:
+        srv.shutdown()
+
+
+# 世界一：合法形状——call 回显 save 生效；桩的 GET 恒回 _stub_body，续拉页不含 PA，
+# 断言如实报「不可达」。这里验证的是**报得出来**（fail + 原因可定位），
+# 而不是桩环境里的通过——通过形态由上游真服务验证。
+ops = [
+    {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"limit": "5000"}},
+     "save": {"drained_ids": "$ids", "cursor": "sync.nextCursor"},
+     "assert": ["opaque_cursor_presents_on_drain"]},
+    {"call": "harness.append_message_at_cursor",
+     "args": {"slot": "g", "cursor": "{cursor}"},
+     "save": {"appended_id": "id"}},
+    {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"cursor": "{cursor}", "limit": "5000"}},
+     "save": {"continuation_ids": "$ids"},
+     "assert": ["cursor_progress_reaches_appended"]},
+]
+r, _ = _run_case_against_stub(ops, {})
+check("执行器路径下 call 回显 save 生效、不可达被如实报出",
+      r.status == "fail" and any("不在续拉结果里" in x for x in r.reasons))
+
+# 世界二（M3 回归）：call 的 save 取不到回显键——必须是**用例级 fail**，
+# 不能静默 pass（旧执行器在这里直接漏掉），也不能 exit 2。
+r3, _ = _run_case_against_stub(
+    [{"call": "harness.append_message_at_cursor", "args": {}, "save": {"appended_id": "missing_key"}}],
+    {},
+)
+check("call 的 save 落空转用例 fail（不静默 pass、不 exit 2）",
+      r3.status == "fail" and any("save 取不到" in x for x in r3.reasons))
+
+# 世界三（M2 回归）：服务端把 cursor 声明为 null——op1 记 save miss + fail，
+# op2 引用 {cursor} 走 CaseError（用例级失败），**不再 exit 2 陪葬整套**。
+null_world = {"body": dict(_stub_body(), sync={"hasMore": False, "nextSince": 1, "nextOffset": 0,
+                                               "nextCursor": None})}
+r4, _ = _run_case_against_stub(
+    [
+        {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"limit": "5000"}},
+         "save": {"drained_ids": "$ids", "cursor": "sync.nextCursor"},
+         "assert": ["opaque_cursor_presents_on_drain"]},
+        {"call": "harness.append_message_at_cursor", "args": {"slot": "g", "cursor": "{cursor}"}},
+    ],
+    {"/pull": null_world},
+)
+check("cursor 为 null 时用例级 fail（排空断言 + CaseError，报告完整）",
+      r4.status == "fail"
+      and any(x.startswith("[exec]") and "None" in x for x in r4.reasons)
+      and any(x.startswith("[opaque_cursor_presents_on_drain]") for x in r4.reasons))
+
+# 世界四（M2 回归 · 键在值 null 的变体）：键存在但值是 null——dig 不抛 KeyError、
+# 无 save miss，但 op2 的 {cursor} 仍要被 CaseError 拦住，而不是拼出字面量 "None"。
+r5, _ = _run_case_against_stub(
+    [
+        {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"limit": "5000"}},
+         "save": {"cursor": "sync.nextCursor"}},
+        {"req": {"GET": "{endpoints.pull}", "slot": "g",
+                 "query": {"cursor": "{cursor}", "limit": "10"}}},
+    ],
+    {"/pull": null_world},
+)
+check("键在值 null 时引用它的 op 是用例级 fail（不拼出字面量 None）",
+      r5.status == "fail" and any("None" in x for x in r5.reasons))
+
+# 世界五（M4 回归）：同 op 多 save，第一个键落空——第二个变量照常绑定，
+# 后续引用不出现「未绑定变量」的 exit 2。
+r6, _ = _run_case_against_stub(
+    [
+        {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"limit": "5000"}},
+         "save": {"gone": "no.such.key", "cursor": "sync.nextCursor"}},
+        {"req": {"GET": "{endpoints.pull}", "slot": "g",
+                 "query": {"cursor": "{cursor}", "limit": "10"}}},
+    ],
+    {},
+)
+check("同 op 多 save 首键落空不影响其余变量绑定（M4）",
+      r6.status == "fail"
+      and any("save 取不到" in x for x in r6.reasons)
+      and not any("未绑定" in x for x in r6.reasons))
+
+# 世界六（expect: bytes 回归）：media 端点返回真实字节——非 JSON 响应走字节断言，
+# 不是 SetupError；Content-Type 为 JSON 的错误信封被不变量拦下。
+media_ops = [
+    {"req": {"GET": "{endpoints.media}", "slot": "exported_media", "expect": "bytes"},
+     "assert": ["media_fetch_bytes_nonempty"]},
+]
+r7, _ = _run_case_against_stub(media_ops, {"/media/whatever": {"raw": b"\x89PNG\r\n\x1a\n"}})
+check("expect:bytes 的非 JSON 响应走字节断言并通过", r7.status == "pass")
+r8, _ = _run_case_against_stub(media_ops, {"/media/whatever": {"raw": b'{"success": false}',
+                                                              "ctype": "application/json"}})
+check("expect:bytes 下 200 的 JSON 错误信封被字节不变量拦下",
+      r8.status == "fail" and any("JSON" in x for x in r8.reasons))
+
 
 print("")
 print("注册表条数：" + str(len(inv.names())))
