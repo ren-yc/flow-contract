@@ -526,7 +526,11 @@ try:
 finally:
     _srv9.shutdown()
 check("op1 fail 后 op2 SkipCase 不覆盖失败状态（fail 优先）",
-      r9.status == "fail" and any("nextCursor" in x for x in r9.reasons))
+      r9.status == "fail"
+      and any("nextCursor" in x for x in r9.reasons)
+      # skip_reason 必须还在：证明 op2 确实走了 SkipCase（缺 harness 端点），
+      # 而不是某处提前 return 让用例「自然结束」——那样这条回归就验了个空。
+      and "harness" in (r9.skip_reason or ""))
 
 
 print("")
