@@ -450,8 +450,15 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 _run_asserts(ctx, op["assert"], result)
         return result
     except SkipCase as e:
-        result.status = "skip"
-        result.skip_reason = e.reason
+        # 已发现的失败不能被后面的 skip 覆盖：op1 断言 fail、op2 因夹具缺
+        # harness 端点 SkipCase 时，把整条用例报成 skip 等于把已确认的契约
+        # 违例藏进「没验证」里（CodeRabbit 复核点名的降级路径）。fail 优先：
+        # 跳过只属于「从头到尾没发现问题」的情形。
+        if result.status != "fail":
+            result.status = "skip"
+            result.skip_reason = e.reason
+        else:
+            result.skip_reason = e.reason
         return result
     except CaseError as e:
         result.status = "fail"

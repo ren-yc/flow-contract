@@ -491,6 +491,43 @@ r8, _ = _run_case_against_stub(media_ops, {"/media/whatever": {"raw": b'{"succes
 check("expect:bytes 下 200 的 JSON 错误信封被字节不变量拦下",
       r8.status == "fail" and any("JSON" in x for x in r8.reasons))
 
+# 世界七（fail 优先回归）：op1 断言 fail，op2 触发 SkipCase——最终状态必须是
+# fail 而不是被 skip 覆盖。桩缺 harness 端点即可制造后续 SkipCase；
+# op1 的 fail 由排空游标缺失产生（桩回没有 nextCursor 的 sync）。
+no_harness_fx_ops = [
+    {"req": {"GET": "{endpoints.pull}", "slot": "g", "query": {"limit": "5000"}},
+     "save": {"cursor": "sync.nextCursor"},
+     "assert": ["opaque_cursor_presents_on_drain"]},
+    {"call": "harness.append_message_at_cursor", "args": {"slot": "g"}},
+]
+class _NoHarnessStub(http.server.BaseHTTPRequestHandler):
+    """只有 pull、没有 harness 控制端点的桩：call 走 SkipCase。"""
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        body = json.dumps({"chatlab": {}, "meta": {}, "members": [], "messages": [],
+                           "sync": {"hasMore": False, "nextSince": 1, "nextOffset": 0}}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+_srv9 = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _NoHarnessStub)
+_port9 = _srv9.server_address[1]
+threading.Thread(target=_srv9.serve_forever, daemon=True).start()
+try:
+    fx9 = {"contractVersion": "0.9.0", "platform": "wechat",
+           "endpoints": {"pull": "/pull"}, "slots": {},
+           "capabilities": {"opaqueCursor": True},
+           "_base_url": "http://127.0.0.1:" + str(_port9)}
+    ctx9 = inv.Ctx(fixture=fx9, case={"id": "s9", "ops": no_harness_fx_ops})
+    r9 = runner_mod.run_case({"id": "s9", "ops": no_harness_fx_ops}, ctx9, None)
+finally:
+    _srv9.shutdown()
+check("op1 fail 后 op2 SkipCase 不覆盖失败状态（fail 优先）",
+      r9.status == "fail" and any("nextCursor" in x for x in r9.reasons))
+
 
 print("")
 print("注册表条数：" + str(len(inv.names())))
