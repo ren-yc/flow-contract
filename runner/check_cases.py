@@ -44,11 +44,21 @@ def main() -> int:
     # 而用例可以点名**可选**能力（缺声明的仓库按 requires 跳过）—— 两者是不同的集合。
     caps_schema = fsch["properties"]["capabilities"]
     known_caps = set(caps_schema.get("properties", {})) | set(caps_schema["required"])
-    # 必填核心端点 + 两个「schema 不强制、但用例可以引用」的可选端点：
-    # `harness` 是控制面；`group-members` 是群主断言的落点（缺它的夹具会按 requires 跳过）。
-    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members"}
+    # 必填核心端点 + 「schema 不强制、但用例可以引用」的可选端点：
+    # `harness` 是控制面；`group-members` 是群主断言的落点；`media` 是媒体字节端点
+    # （mediaById 能力的落点，见解释记录第 12 条）。缺它的夹具会按 requires 跳过。
+    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members", "media"}
     # 槽位名没有固定词表（由夹具决定），但示例里给出的这几个是「约定俗成」的；
     # 因此这里只做**收集**，把用到的槽位打印出来供人核对。
+
+    # harness 动作词表：与 fixture.schema.json 的 endpoints.description 登记一致。
+    # call 的动作名拼错只能在运行期以「动作返回 400」暴露（exit 2 且报告丢失）——
+    # 在这里静态拦下来，PR 阶段就能看到是哪个用例拼错了哪个词。
+    KNOWN_ACTIONS = {
+        "harness.append_message",
+        "harness.append_message_at_cursor",
+        "harness.deregister",
+    }
 
     files = sorted((ROOT / "cases").rglob("*.json"))
     if not files:
@@ -129,9 +139,14 @@ def main() -> int:
             if isinstance(req, dict):
                 for k, v in req.items():
                     if k in ("GET", "POST", "PUT", "DELETE", "PATCH") and isinstance(v, str):
-                        m = re.match(r"^\{endpoints\.([a-z0-9_]+)\}$", v)
+                        m = re.match(r"^\{endpoints\.([a-z0-9_-]+)\}$", v)
                         if m:
                             endpoints_used.add(m.group(1))
+            action = op.get("call")
+            if isinstance(action, str) and action not in KNOWN_ACTIONS:
+                problems.append(
+                    str(rel) + ": harness 动作 " + action + " 不在动作词表里（见 fixture.schema.json 的 endpoints 描述）"
+                )
 
     missing = sorted(asserts_used - set(inv.names()))
     for name in missing:

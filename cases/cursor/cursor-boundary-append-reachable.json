@@ -1,0 +1,55 @@
+{
+  "id": "cursor-boundary-append-reachable",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "endpoint:harness",
+    "slot:group_with_messages"
+  ],
+  "note": "排空后（同秒）追加的消息必须可经不透明游标续拉到达：时间下界滤不到排空后才入库的同秒行，进度游标的承诺是它仍然可达",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "drained_ids": "$ids",
+        "cursor": "sync.nextCursor"
+      },
+      "assert": [
+        "drained_cursor_terminal_state",
+        "opaque_cursor_presents_on_drain"
+      ]
+    },
+    {
+      "call": "harness.append_message_at_cursor",
+      "args": {
+        "slot": "group_with_messages",
+        "cursor": "{cursor}"
+      },
+      "save": {
+        "appended_id": "id"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "cursor": "{cursor}",
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "continuation_ids": "$ids"
+      },
+      "assert": [
+        "cursor_progress_reaches_appended"
+      ]
+    }
+  ]
+}

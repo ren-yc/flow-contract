@@ -44,7 +44,7 @@
       "additionalProperties": {
         "type": "string",
         "pattern": "^/",
-        "description": "以 / 开头的路径。**需要会话 id 的端点用 {id} 占位**（如 /api/v1/sessions/{id}/messages），执行器在用例给了 slot 时替换它。额外端点（例如 harness 控制端点）也可以在这里声明。"
+        "description": "以 / 开头的路径。**需要会话 id 的端点用 {id} 占位**（如 /api/v1/sessions/{id}/messages），执行器在用例给了 slot 时替换它。额外端点（例如 harness 控制端点、media 字节端点）也可以在这里声明。媒体字节端点（mediaById 能力的落点）返回原始字节而非 JSON。harness 控制端点的动作词表（用例经 call 点名，POST {action, args}）：harness.append_message（向槽位会话追加一条消息；无回显约定）、harness.append_message_at_cursor（参数 {slot, cursor}，向 cursor 表达的入库进度之后追加一条消息，回显 {id: 新消息 platformMessageId}；opaqueCursor 能力的配套动作）、harness.deregister（注销当前绑定账号；无参数）。动作返回 JSON 对象，用例经 call op 的 save 取回显键。"
       }
     },
     "slots": {
@@ -77,6 +77,10 @@
       "properties": {
         "mediaById": {
           "type": "boolean"
+        },
+        "opaqueCursor": {
+          "type": "boolean",
+          "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable）。"
         },
         "sns": {
           "type": "boolean"

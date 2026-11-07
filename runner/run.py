@@ -55,6 +55,15 @@ class SetupError(Exception):
     """环境或用例非法——按退出码 2 处理，与断言失败区分开。"""
 
 
+class CaseError(Exception):
+    """服务端契约违例在**用例执行期**的暴露（如把 None 游标插进请求）。
+
+    它不是环境错误：服务活着、请求发出去了，坏的是响应内容与契约的差距。
+    处置是当前用例 fail（原因进报告），后续用例照跑——把它混进 SetupError
+    会把整套用例的执行中断、报告全丢，契约违例反而被报成环境错误。
+    """
+
+
 class SkipCase(Exception):
     def __init__(self, reason: str):
         super().__init__(reason)
@@ -84,9 +93,17 @@ def resolve(text, ctx):
     def sub(m):
         key = m.group(1)
         try:
-            return str(dig(ctx.variables, key))
+            val = dig(ctx.variables, key)
         except KeyError:
-            raise SetupError("用例引用了未绑定的变量 {" + key + "}") from None
+            raise CaseError("用例引用了未绑定的变量 {" + key + "}") from None
+        # None 展开成字符串 "None" 是一个静默错值（sse_open 对重连游标有同款守卫）：
+        # save 取不到键时存进变量表的是 None，把它插进 query 就是字面量 "None"，
+        # 服务端拿到的是必错的参数而用例照常往下跑。这里是**用例级**失败——
+        # 服务端没兑现它声明的字段，不是环境坏了。
+        if val is None:
+            raise CaseError("变量 {" + key + "} 的值是 None——上游键缺失或排空后为 null，"
+                            "带着它继续只会得到必错的请求")
+        return str(val)
 
     return _VAR.sub(sub, text)
 
@@ -104,6 +121,10 @@ def endpoint_path(tpl: str, ctx, slot: str | None):
         if not slot:
             raise SetupError("端点 " + name + " 的路径含 {id}，但这一步没给 slot")
         path = path.replace("{id}", str(ctx.variables.get("slot:" + slot, "")))
+    # 注意：slot 在不含 {id} 的端点上（如 pull）是合法的——它经 `slot:名字` 变量
+    # 参与查询参数（chatlab-messages-page 就这样用），不代表路径替换意图。
+    # 「给了 slot 但路径无处可放」不能在这里判死；媒体句柄类的错绑由
+    # media_fetch_bytes_nonempty 的四层判据在响应侧兜住。
     return path
 
 
@@ -140,15 +161,32 @@ def request(ctx, op, token: str | None):
     try:
         conn.request(method, path, body=body, headers=headers)
         resp = conn.getresponse()
-        raw = resp.read().decode("utf-8", "replace")
+        raw_bytes = resp.read()
         status = resp.status
+        # 记录 Content-Type：字节断言用它区分「真的媒体字节」与「恰好也是字节的
+        # JSON 错误信封」——没有它，一个 200 的 JSON 页也能让非空断言假通过。
+        ctx.response_content_type = resp.getheader("Content-Type") or ""
     finally:
         conn.close()
     ctx.requests += 1
+    # 原始字节全程保留：媒体等字节端点的响应不是文本，先 decode 再编码回去会
+    # 被 replace 替换成 U+FFFD，字节级断言就再也拦不住内容损坏。
+    ctx.raw = raw_bytes
+    raw = raw_bytes.decode("utf-8", "replace")
     try:
         parsed = json.loads(raw) if raw else None
     except json.JSONDecodeError:
-        raise SetupError("响应不是 JSON（HTTP " + str(status) + "）：" + raw[:200]) from None
+        # 非 JSON 响应是**合法响应**的两种情形之一：op 声明了 `expect: bytes`
+        # （媒体等字节端点），或响应本来就不是文本。没声明却拿到非 JSON
+        # （JSON 端点返回 HTML 错误页）保持响亮失败——把它静默容忍掉，
+        # 后续断言只会说「顶层键为空」，根因（服务返回了错误页）就看不见了。
+        if req.get("expect") == "bytes":
+            ctx.body = None
+            return status, ctx.raw
+        raise SetupError(
+            "响应不是 JSON（HTTP " + str(status) + "，Content-Type "
+            + repr(ctx.response_content_type) + "）：" + raw[:200]
+        ) from None
     return status, parsed
 
 
@@ -325,6 +363,25 @@ def eval_condition(expr: str, ctx) -> bool:
 
 # ── 用例执行 ──
 
+def _consume_misses(ctx, result):
+    """把 save 落空的记录转成本用例失败。三个出口都要消费：
+    主干（req op）、call 分支、_loop 每轮——漏掉任何一个，落空就静默 pass
+    （变量表里躺着 None，断言却从未被告知）。capture 后立即消费，不跨 op 留存。
+    同文去重：loop_until 每轮消费一次，同一 save 落空会反复进入 captured——
+    原因相同就只报一条，报告里 6 条同文不是更多信息而是噪声。
+    """
+    seen = getattr(result, "_seen_misses", None)
+    if seen is None:
+        seen = set()
+        result._seen_misses = seen
+    for m in ctx.captured.pop("save_misses", []):
+        if m in seen:
+            continue
+        seen.add(m)
+        result.status = "fail"
+        result.reasons.append("[save] " + m)
+
+
 def run_case(case, ctx, token: str | None) -> rep.Result:
     result = rep.Result(case_id=case["id"], group=case.get("group", ""))
     try:
@@ -364,7 +421,19 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                     pair[0].close()
                 continue
             if "call" in op:
-                _harness_call(ctx, op, token)
+                # call 也走 save：动作的回显（如 append 动作返回新消息 id）要落进
+                # 变量表，后续断言才有「追加的是什么」这个基准。此前 call 分支提前
+                # continue、回显整个被丢弃，用例想要它只能靠空气——执行器少做一步，
+                # 用例层面看不出来（这条也是被独立复核实测戳穿的）。
+                try:
+                    _harness_call(ctx, op, token)
+                    _apply_save(ctx, op, case)
+                    _consume_misses(ctx, result)
+                    if "assert" in op:
+                        _run_asserts(ctx, op["assert"], result)
+                except CaseError as e:
+                    result.status = "fail"
+                    result.reasons.append("[exec] " + str(e))
                 continue
             if "loop_until" in op:
                 _loop(ctx, op, token, result, case)
@@ -376,12 +445,24 @@ def run_case(case, ctx, token: str | None) -> rep.Result:
                 ctx.variables["request_limit"] = (op["req"].get("query") or {}).get("limit")
                 ctx.variables["request_since"] = (op["req"].get("query") or {}).get("since")
             _apply_save(ctx, op, case)
+            _consume_misses(ctx, result)
             if "assert" in op:
                 _run_asserts(ctx, op["assert"], result)
         return result
     except SkipCase as e:
-        result.status = "skip"
-        result.skip_reason = e.reason
+        # 已发现的失败不能被后面的 skip 覆盖：op1 断言 fail、op2 因夹具缺
+        # harness 端点 SkipCase 时，把整条用例报成 skip 等于把已确认的契约
+        # 违例藏进「没验证」里（CodeRabbit 复核点名的降级路径）。fail 优先：
+        # 跳过只属于「从头到尾没发现问题」的情形。
+        if result.status != "fail":
+            result.status = "skip"
+            result.skip_reason = e.reason
+        else:
+            result.skip_reason = e.reason
+        return result
+    except CaseError as e:
+        result.status = "fail"
+        result.reasons.append("[exec] " + str(e))
         return result
 
 
@@ -429,7 +510,17 @@ def _apply_save(ctx, op, case):
         try:
             ctx.variables[var] = dig(ctx.body, path)
         except KeyError:
-            raise SetupError("save 取不到 " + path + "（用例 id：" + case.get("id", "?") + "）") from None
+            # 缺键是**服务端契约违例**（说好的字段没给），不是环境错误——
+            # 中断整套（exit 2）会把其余 37 条用例的验证一并陪葬；
+            # 存 None 又会被 resolve 的 None 守卫拦下，用例仍是失败但报得准。
+            # 这里记成用例失败并给变量 None，让断言/后续 resolve 接住它。
+            # continue 而不是 return：同 op 的其余 save 变量照常绑定，
+            # 否则「第一个键落空」会把后面的变量全部变成未绑定（exit 2）。
+            ctx.variables[var] = None
+            ctx.captured.setdefault("save_misses", []).append(
+                "save 取不到 " + path + "（用例 id：" + case.get("id", "?") + "）"
+            )
+            continue
 
 
 def _loop(ctx, op, token, result, case):
@@ -442,27 +533,48 @@ def _loop(ctx, op, token, result, case):
         ctx.status, ctx.body = status, body
         ctx.pages.append(_page_summary(body))
         _apply_save(ctx, op, case)
+        _consume_misses(ctx, result)
         if "assert" in op:
             _run_asserts(ctx, op["assert"], result)
         if eval_condition(spec, ctx):
             return
-    raise SetupError("loop_until 在 " + str(limit) + " 次内没有满足：" + spec)
+    # 不收敛是**服务端行为**违反了用例的翻页预期，与「save 落空」同级——
+    # 是用例失败而不是环境错误：SetupError 会 exit 2 丢掉整套报告，
+    # 这里抛 CaseError 让已积累的断言原因与这条一起进报告。
+    raise CaseError("loop_until 在 " + str(limit) + " 次内没有满足：" + spec)
 
 
 def _harness_call(ctx, op, token):
     table = ctx.fixture.get("endpoints", {})
     if "harness" not in table:
         raise SkipCase("夹具没有声明 harness 端点——该仓库的 harness 不提供控制动作")
-    payload = {"action": op["call"], "args": op.get("args", {})}
+    # args 里的 {var} 引用必须先解析：游标类用例要把上一页存下的 {cursor} 传给
+    # append 动作（"在游标之后追加"），不解析就变成了字面量字符串，动作语义尽失。
+    raw_args = op.get("args", {}) or {}
+    args = {k: resolve(v, ctx) for k, v in raw_args.items()}
+    payload = {"action": op["call"], "args": args}
     base = _split_base(ctx.fixture["_base_url"])
     conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=30)
     try:
         conn.request("POST", table["harness"], body=json.dumps(payload),
                      headers={"Content-Type": "application/json"})
         resp = conn.getresponse()
-        resp.read()
+        raw_bytes = resp.read()
+        # call 后的断言要看到**本次动作**的状态与响应，而不是上一个 req 的陈旧值：
+        # 与 request() 同款三件套（status/raw/content_type）全部刷新。
+        ctx.status = resp.status
+        ctx.raw = raw_bytes
+        ctx.response_content_type = resp.getheader("Content-Type") or ""
+        raw = raw_bytes.decode("utf-8", "replace")
         if resp.status >= 400:
             raise SetupError("harness 动作 " + op["call"] + " 返回 " + str(resp.status))
+        # 回显进 ctx.body（与 req 同款解析）：动作返回什么，用例的 save 就能取什么。
+        # 解析失败保持静默容忍——harness 控制端点的响应形状不是契约的一部分，
+        # 不能因为某仓回显了非 JSON 而把整条用例打成环境错误。
+        try:
+            ctx.body = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            ctx.body = None
     finally:
         conn.close()
 

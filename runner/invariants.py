@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -29,6 +30,8 @@ class Ctx:
     slot: str | None = None
     status: int = 0
     body: Any = None
+    raw: bytes = b""
+    response_content_type: str = ""
     variables: dict = field(default_factory=dict)
     pages: list = field(default_factory=list)
     streams: dict = field(default_factory=dict)
@@ -520,6 +523,83 @@ def _incremental(ctx: Ctx) -> str | None:
             return f"增量里出现了不新于水位线的消息：timestamp={n} <= watermark={wm}"
     return None
 
+
+@invariant(
+    "cursor_progress_reaches_appended",
+    "排空后按服务端给的游标续拉，排空前追加的消息必须可达"
+)
+def _cursor_progress_reaches_appended(ctx: Ctx) -> str | None:
+    # 时间游标的盲区：页面排空把进度推到「当前时刻」，而同一秒内**稍后才入库**的消息
+    # 落在游标后方，时间下界永远滤不到它。不透明进度游标的承诺是「排空时刻之后入库的行
+    # 仍然可达」——排空后由 harness 注入一条消息、再按返回的游标续拉时验证。
+    #
+    # 三个集合都由用例显式 save：排空基准（drained_ids）、续拉响应（continuation_ids）、
+    # 追加消息（appended_id）。不拿 ctx.pages 推断页边界——排空请求自己也在 pages 里，
+    # 从页序列里猜「哪一页开始是续拉」必然把排空页误判成重放（自测拦下了这一版）。
+    drained = ctx.variables.get("drained_ids")
+    got = ctx.variables.get("continuation_ids")
+    appended = ctx.variables.get("appended_id")
+    if not (isinstance(drained, list) and isinstance(got, list)):
+        return "缺少基准：排空与续拉两页都要 save 成 id 列表（$ids 哨兵）"
+    if not drained:
+        # 空基准会让「游标生效」与「游标被忽略后从空页开始」无法区分——
+        # 两种世界的断言都通过。夹具声明了本能力就该有可排空的数据。
+        return "排空基准为空：本用例需要一个至少有一条消息的会话（slot expect.messages ≥ 1）"
+    if not isinstance(appended, str) or not appended:
+        return "缺少基准：harness 追加后必须把新消息 id 存进 appended_id"
+    if appended in set(drained):
+        return "追加的消息出现在排空基准里：harness 没有把它注入为排空后的新行"
+    if appended not in set(got):
+        return (
+            "排空后追加的消息不可达：id "
+            + repr(appended)
+            + " 不在续拉结果里——进度游标没有覆盖排空后入库的行"
+        )
+    dup = set(got) & set(drained)
+    if dup:
+        return f"续拉重放了排空前的消息：{sorted(dup)[:3]}"
+    return None
+
+
+@invariant(
+    "opaque_cursor_presents_on_drain",
+    "排空后 sync.nextCursor 仍是非空字符串（与消息面 page.nextCursor 排空为 null 的约定不同）"
+)
+def _opaque_cursor_on_drain(ctx: Ctx) -> str | None:
+    # 进度游标与消息面的翻页游标语义不同：消息面排空即终结（null），
+    # 进度游标要继续表达「下次增量从哪里起」——排空后必须仍在场，
+    # 否则客户端拿不到下一个增量请求的起点。实现者把两个约定平移错了会在这里被拦。
+    sync = _sync(ctx)
+    v = sync.get("nextCursor")
+    if not isinstance(v, str) or not v:
+        return f"排空后 sync.nextCursor 应为非空字符串（进度游标不终结），实际 {v!r}"
+    return None
+
+
+@invariant(
+    "media_fetch_bytes_nonempty",
+    "按 mediaId 句柄取字节：HTTP 200、非 JSON Content-Type、响应体非空"
+)
+def _media_fetch_bytes(ctx: Ctx) -> str | None:
+    # 第 9 条解释的承诺用例化：mediaId 出现 ⇒ 按它的值取字节必须成功。
+    # 只看状态码与字节数会让 200 的错误信封假通过。四层判据：
+    # 状态码 / Content-Type / raw 能否解析成 JSON 对象 / 字节数。
+    # 注意第三层看的是 **raw 本身**：ctx.body 在非 JSON 响应时被 request() 置 None，
+    # 直接构造 ctx 的调用方（自测）可能带着无关的 dict body —— 以 ctx.body 判定会误伤。
+    if ctx.status != 200:
+        return f"按句柄取媒体应返回 200，实际 {ctx.status}"
+    ctype = (getattr(ctx, "response_content_type", "") or "").lower()
+    if "json" in ctype:
+        return f"按句柄取媒体返回了 JSON（{ctype!r}）——那是错误信封的形状，不是媒体字节"
+    try:
+        parsed = json.loads(ctx.raw.decode("utf-8", "replace")) if ctx.raw else None
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return "按句柄取媒体的响应体解析成了 JSON 对象——那是错误信封，不是媒体字节"
+    if not ctx.raw:
+        return "按句柄取媒体返回了空响应体——句柄承诺的「字节可取」没有兑现"
+    return None
 
 # ── D 组：鉴权 ──
 
