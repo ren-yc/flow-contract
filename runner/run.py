@@ -128,6 +128,26 @@ def endpoint_path(tpl: str, ctx, slot: str | None):
     return path
 
 
+def resolve_body(value, ctx):
+    """Resolve JSON references recursively, preserving scalar/object types."""
+    if isinstance(value, dict):
+        return {key: resolve_body(item, ctx) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resolve_body(item, ctx) for item in value]
+    if isinstance(value, str):
+        match = _VAR.fullmatch(value)
+        if match:
+            try:
+                result = dig(ctx.variables, match.group(1))
+            except KeyError:
+                raise CaseError("JSON body 引用了未绑定的变量") from None
+            if result is None:
+                raise CaseError("JSON body 引用值缺失")
+            return result
+        return resolve(value, ctx)
+    return value
+
+
 # ── HTTP ──
 
 def _split_base(base_url: str):
@@ -156,7 +176,7 @@ def request(ctx, op, token: str | None):
     body = None
     headers = {}
     if "body" in req:
-        body = json.dumps(req["body"])
+        body = json.dumps(resolve_body(req["body"], ctx))
         headers["Content-Type"] = "application/json"
     try:
         conn.request(method, path, body=body, headers=headers)
@@ -699,6 +719,7 @@ def main(argv=None) -> int:
         ctx = inv.Ctx(fixture=fixture, case=case)
         for slot, spec in (fixture.get("slots") or {}).items():
             ctx.variables["slot:" + slot] = spec.get("id", "")
+        ctx.variables["slots"] = fixture.get("slots", {})
         # 执行期的 SetupError 在这里补上用例名再抛：否则顶层只报「loop_until 在 80 次内没有满足」
         # 之类的话，**看不出是哪条用例**，而契约套件里有 33 条、其中多条用同一个不变量。
         try:

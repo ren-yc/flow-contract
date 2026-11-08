@@ -47,7 +47,7 @@ def main() -> int:
     # 必填核心端点 + 「schema 不强制、但用例可以引用」的可选端点：
     # `harness` 是控制面；`group-members` 是群主断言的落点；`media` 是媒体字节端点
     # （mediaById 能力的落点，见解释记录第 12 条）。缺它的夹具会按 requires 跳过。
-    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members", "media"}
+    known_endpoints = set(fsch["properties"]["endpoints"]["required"]) | {"harness", "group-members", "media", "media_export"}
     # 槽位名没有固定词表（由夹具决定），但示例里给出的这几个是「约定俗成」的；
     # 因此这里只做**收集**，把用到的槽位打印出来供人核对。
 

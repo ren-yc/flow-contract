@@ -78,6 +78,10 @@
         "mediaById": {
           "type": "boolean"
         },
+        "mediaExportByMessage": {
+          "type": "boolean",
+          "description": "支持 POST media_export：按 talker、platformMessageId、sender、timestamp 唯一定位本地媒体并返回实际句柄；独立于 mediaById。"
+        },
         "opaqueCursor": {
           "type": "boolean",
           "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable）。"

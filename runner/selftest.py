@@ -388,7 +388,7 @@ def _run_case_against_stub(case_ops, responses):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         fx = {
-            "contractVersion": "0.9.0",
+            "contractVersion": (Path(__file__).resolve().parents[1] / "VERSION").read_text().strip(),
             "platform": "wechat",
             "endpoints": {"pull": "/pull", "harness": "/__harness", "media": "/media/{id}"},
             "slots": {"exported_media": {"id": "whatever"}},
@@ -517,7 +517,7 @@ _srv9 = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _NoHarnessStub)
 _port9 = _srv9.server_address[1]
 threading.Thread(target=_srv9.serve_forever, daemon=True).start()
 try:
-    fx9 = {"contractVersion": "0.9.0", "platform": "wechat",
+    fx9 = {"contractVersion": (Path(__file__).resolve().parents[1] / "VERSION").read_text().strip(), "platform": "wechat",
            "endpoints": {"pull": "/pull"}, "slots": {},
            "capabilities": {"opaqueCursor": True},
            "_base_url": "http://127.0.0.1:" + str(_port9)}
@@ -535,6 +535,26 @@ check("op1 fail 后 op2 SkipCase 不覆盖失败状态（fail 优先）",
 
 print("")
 print("注册表条数：" + str(len(inv.names())))
+print("定向媒体导出")
+b = {"success": True, "mediaId": "digest.png", "fileName": "digest.png", "mediaUrl": "/api/v1/media/digest.png"}
+c = ctx_with(b)
+c.fixture["endpoints"] = {"media": "/api/v1/media/{id}"}
+c.status = 200
+check("定向句柄合法", run("targeted_media_export_handle", c) is None)
+for key, wrong in [("mediaId", " "), ("mediaId", ".."), ("mediaId", "../bad"), ("fileName", "other.png"), ("mediaUrl", "https://example.test/media?token=secret"), ("success", False)]:
+    c.body = {**b, key: wrong}
+    check("定向导出拒绝错误 " + key, run("targeted_media_export_handle", c) is not None)
+import run as runner
+c.variables = {"target": {"timestamp": 123, "sender": "sample"}}
+check("JSON body 保留整数类型", runner.resolve_body({"timestamp": "{target.timestamp}"}, c) == {"timestamp": 123})
+check("JSON body 解析嵌套字段", runner.resolve_body(["{target.sender}"], c) == ["sample"])
+for missing in ("{missing}", "{target.absent}"):
+    try:
+        runner.resolve_body(missing, c)
+        check("JSON body 拒绝缺失变量", False)
+    except runner.CaseError:
+        check("JSON body 拒绝缺失变量", True)
+
 if FAILS:
     print("失败 " + str(len(FAILS)) + " 项：" + "；".join(FAILS))
     sys.exit(1)

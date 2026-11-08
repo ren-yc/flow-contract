@@ -783,3 +783,20 @@ def _offset_since_id_set(ctx: Ctx) -> str | None:
     if w != expect:
         return "小页窗口的 id 序列与全量去掉第一条后的前缀不一致：got=" + repr(w[:6]) + " expect=" + repr(expect[:6])
     return None
+
+
+@invariant("targeted_media_export_handle", "定向导出成功返回实际文件名和无凭据根相对句柄")
+def _targeted_media_export_handle(ctx: Ctx) -> str | None:
+    if ctx.status != 200 or not isinstance(ctx.body, dict) or ctx.body.get("success") is not True:
+        return "定向媒体导出未成功"
+    handle = ctx.body.get("mediaId")
+    if not isinstance(handle, str) or not handle.strip() or handle in (".", "..") or any(c in handle for c in "/\\?#"):
+        return "mediaId 必须是非空单路径分量"
+    if ctx.body.get("fileName") != handle:
+        return "fileName 必须等于实际可取句柄"
+    template = ctx.fixture.get("endpoints", {}).get("media", "")
+    if not template.startswith("/") or template.startswith("//") or "{id}" not in template:
+        return "夹具 media 端点必须声明根相对的 {id} 路径"
+    if ctx.body.get("mediaUrl") != template.replace("{id}", handle):
+        return "mediaUrl 必须匹配无凭据根相对字节端点"
+    return None
