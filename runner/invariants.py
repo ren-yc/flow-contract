@@ -446,6 +446,46 @@ def _unknown_404(ctx: Ctx) -> str | None:
     return None
 
 
+@invariant("malformed_cursor_is_a_bad_request", "语法坏的游标是 400，不是 200 也不是 409")
+def _malformed_cursor_400(ctx: Ctx) -> str | None:
+    # 400 与 409 的处置相反：400 说明调用方编错了游标（重试同一条永远不会成功），
+    # 409 说明游标本身没问题、世界变了（重来正是正确动作）。压成一个状态码，
+    # 调用方只能二选一地猜。这里是前者：语法坏。
+    if ctx.status != 400:
+        return f"语法坏的游标应返回 400，实际 {ctx.status}（退回时间模式给一页数据也算错）"
+    if not isinstance(ctx.body, dict):
+        return f"400 的响应体不是对象：{ctx.body!r}"
+    if ctx.body.get("success") is not False:
+        return f"400 的信封里 success 应为 false：{ctx.body!r}"
+    if ctx.body.get("code") != 400:
+        return f"400 的信封里 code 应回显 400：{ctx.body!r}"
+    msg = ctx.body.get("message")
+    if not isinstance(msg, str) or not msg:
+        return f"400 的信封里 message 应为非空字符串：{ctx.body!r}"
+    return None
+
+
+@invariant(
+    "foreign_cursor_is_a_reset_with_reason",
+    "别的会话的游标是 409，且信封顶层带 reason=cursor_reset_required",
+)
+def _foreign_cursor_reset(ctx: Ctx) -> str | None:
+    # `reason` 必须是**机器可读的顶层字段**：客户端按它决定「丢弃游标、从头拉一次」，
+    # 而不是去匹配 message 的自然语言。错误文本会改、会本地化、会被日志截断。
+    if ctx.status != 409:
+        return f"身份对不上的游标应返回 409，实际 {ctx.status}（静默从头拉也算错）"
+    if not isinstance(ctx.body, dict):
+        return f"409 的响应体不是对象：{ctx.body!r}"
+    if ctx.body.get("success") is not False:
+        return f"409 的信封里 success 应为 false：{ctx.body!r}"
+    if ctx.body.get("code") != 409:
+        return f"409 的信封里 code 应回显 409：{ctx.body!r}"
+    reason = ctx.body.get("reason")
+    if reason != "cursor_reset_required":
+        return f"409 的信封顶层 reason 应为 cursor_reset_required，实际 {reason!r}：{ctx.body!r}"
+    return None
+
+
 @invariant("same_second_not_split", "同一秒不跨页：前页末条早于后页首条")
 def _same_second(ctx: Ctx) -> str | None:
     if len(ctx.pages) < 2:

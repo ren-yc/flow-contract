@@ -1,0 +1,25 @@
+{
+  "id": "cursor-malformed-is-a-bad-request",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "capability:cursorReset",
+    "slot:group_with_messages"
+  ],
+  "note": "兑现不了的游标必须被拒绝：语法坏是 400（调用方有 bug，重试同一条永远不成功），而不是退回时间模式给一页看起来正常的数据",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "cursor": "!!!not-a-cursor!!!",
+          "limit": "2"
+        }
+      },
+      "assert": [
+        "malformed_cursor_is_a_bad_request"
+      ]
+    }
+  ]
+}

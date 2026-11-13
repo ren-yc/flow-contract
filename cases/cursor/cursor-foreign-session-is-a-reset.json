@@ -1,0 +1,38 @@
+{
+  "id": "cursor-foreign-session-is-a-reset",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "capability:cursorReset",
+    "slot:private_with_messages",
+    "slot:group_with_messages"
+  ],
+  "note": "别的会话的游标是 409 加 reason=cursor_reset_required：客户端据此丢弃游标、从头拉一次；静默当成从头拉会让「重放」与「续拉」无法区分",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "private_with_messages",
+        "query": {
+          "limit": "2"
+        }
+      },
+      "save": {
+        "foreign": "sync.nextCursor"
+      }
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "cursor": "{foreign}",
+          "limit": "2"
+        }
+      },
+      "assert": [
+        "foreign_cursor_is_a_reset_with_reason"
+      ]
+    }
+  ]
+}
