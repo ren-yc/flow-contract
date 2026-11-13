@@ -20,6 +20,22 @@ from typing import Any
 TS_MIN = 1e9
 TS_MAX = 4e9
 
+# 媒体句柄的字符集：句柄要能直接作为 URL 路径段，所以限定在 URL 安全集合里
+# （字母、数字、`.`、`~`、`-`、`_`）。内容摘要形态天然落在这个集合内。
+_HANDLE_CHARS = set("abcdefghijklmnopqrstuvwxyz"
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                    "0123456789._~-")
+
+
+def _is_media_handle(value) -> bool:
+    """句柄形态：URL 安全单段 token（含 `.`/`..` 的排除）。
+
+    拉取面的 mediaId 与按消息身份导出的 mediaId 用同一条判据——两个面都把它拼进
+    媒体端点的路径段，一处放宽就会给出拼出非法 URL 的「句柄」。
+    """
+    return (isinstance(value, str) and bool(value) and value not in (".", "..")
+            and all(c in _HANDLE_CHARS for c in value))
+
 
 @dataclass
 class Ctx:
@@ -329,20 +345,22 @@ def _media_shape(ctx: Ctx) -> str | None:
                 return f"media.md5 出现时应为非空字符串，实际 {v!r}"
     return None
 
-@invariant("media_id_shape_in_pull", "mediaId 出现时是非空字符串，且 media 键必须同时存在")
+@invariant("media_id_shape_in_pull", "mediaId 出现时是 URL 安全单段句柄，且 media 键必须同时存在")
 def _media_id_shape(ctx: Ctx) -> str | None:
     # 句柄在**消息这一层**而不在 media 对象里：media 的键集由 media_shape_in_pull 钉死为
     # {type, fileName, md5}（它拒绝任何多余键），把句柄塞进去会被那条不变量直接判红。
     # 本条管的是消息层的 mediaId 本身：
-    #   · 出现即必须是**非空字符串**——「取不到」的表达方式是省略整键；给 null 或空串会让
-    #     按类型读取的下游当场炸，而空句柄更糟：调用方会拿它去拼请求。
+    #   · 出现即必须是 URL 安全单段句柄（只允许 A-Za-z0-9._~-，且不是 . 或 ..）——
+    #     「取不到」的表达方式是省略整键；给 null、空串或带空格/非 ASCII 的名字会让
+    #     调用方拼出非法请求，比不给更坏。
     #   · 有句柄就必须同时有 media 键：「这条媒体取得到字节」而「这条消息没有媒体」是矛盾态。
     for m in _messages(ctx):
         if "mediaId" not in m:
             continue
         v = m["mediaId"]
-        if isinstance(v, bool) or not isinstance(v, str) or not v:
-            return f"mediaId 出现时应为非空字符串（不承诺时省略整键，而不是 null/空串），实际 {v!r}"
+        if not _is_media_handle(v):
+            return (f"mediaId 出现时应为 URL 安全单段句柄（只允许 A-Za-z0-9._~-）；"
+                    f"不承诺时省略整键，而不是 null、空串或带编码的名字，实际 {v!r}")
         if "media" not in m:
             return f"消息带着 mediaId 却没有 media 键（声称取得到字节的媒体不存在）：{m!r}"
     return None
@@ -785,18 +803,28 @@ def _offset_since_id_set(ctx: Ctx) -> str | None:
     return None
 
 
-@invariant("targeted_media_export_handle", "定向导出成功返回实际文件名和无凭据根相对句柄")
+@invariant("targeted_media_export_handle", "定向导出成功并返回 URL 安全句柄与可取字节地址")
 def _targeted_media_export_handle(ctx: Ctx) -> str | None:
-    if ctx.status != 200 or not isinstance(ctx.body, dict) or ctx.body.get("success") is not True:
-        return "定向媒体导出未成功"
+    if ctx.status != 200:
+        return "定向媒体导出应返回 200，实际 " + str(ctx.status)
+    if not isinstance(ctx.body, dict) or ctx.body.get("success") is not True:
+        return "定向媒体导出未成功（success 不是 true）"
     handle = ctx.body.get("mediaId")
-    if not isinstance(handle, str) or not handle.strip() or handle in (".", "..") or any(c in handle for c in "/\\?#"):
-        return "mediaId 必须是非空单路径分量"
-    if ctx.body.get("fileName") != handle:
-        return "fileName 必须等于实际可取句柄"
+    # 句柄会被拼进媒体端点的路径段，所以契约要求它本身就是 URL 安全 token
+    # （内容摘要形态）。空格、非 ASCII、`?`、`#` 一律不接受——接受它们会让执行器
+    # 拼出非法 URL，而这里正是唯一能说清「是谁不合规」的位置。
+    if not _is_media_handle(handle):
+        return "mediaId 必须是 URL 安全单段句柄（只允许 A-Za-z0-9._~-，且不是 . 或 ..）"
+    # fileName 是展示名，不是句柄：允许为空、允许平台原名（含非 ASCII），与第 7、9 条同义。
+    # 但它会进日志与导出物，控制字符与路径分隔符一律不接受。
+    name = ctx.body.get("fileName")
+    if not isinstance(name, str):
+        return "fileName 必须是字符串（展示名，可为空）"
+    if any(ord(c) < 32 or c in "/\\" for c in name):
+        return "fileName 是展示名：不得含控制字符或路径分隔符"
     template = ctx.fixture.get("endpoints", {}).get("media", "")
     if not template.startswith("/") or template.startswith("//") or "{id}" not in template:
-        return "夹具 media 端点必须声明根相对的 {id} 路径"
+        return "夹具 media 端点必须声明根相对的 {id} 路径，实际 " + repr(template)
     if ctx.body.get("mediaUrl") != template.replace("{id}", handle):
-        return "mediaUrl 必须匹配无凭据根相对字节端点"
+        return "mediaUrl 必须等于夹具 media 模板替换 {id} 后的根相对路径"
     return None

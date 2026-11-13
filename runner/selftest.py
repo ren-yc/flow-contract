@@ -346,9 +346,11 @@ def _stub_body(**over):
     return body
 
 
-def _run_case_against_stub(case_ops, responses):
+def _run_case_against_stub(case_ops, responses, fixture_over=None, post_responses=None, seen=None, requires=None):
     """对桩跑一条完整用例。responses：请求路径（不含查询串）→ 响应字典
-    （缺省 _stub_body），供各「坏世界」注入畸形响应。返回 (result, ctx)。"""
+    （缺省 _stub_body），供各「坏世界」注入畸形响应。fixture_over 覆盖夹具段，
+    post_responses 按路径回固定 JSON（缺省仍走 harness 动作桩），seen 收集实际请求，
+    requires 原样带进用例（跳过条件的回归靠它）。返回 (result, ctx)。"""
 
     class _Stub(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -357,9 +359,15 @@ def _run_case_against_stub(case_ops, responses):
         def do_POST(self):
             n = int(self.headers.get("Content-Length", 0))
             payload = json.loads(self.rfile.read(n))
-            out = {"success": True}
-            if payload.get("action") == "harness.append_message_at_cursor":
-                out["id"] = "PA"
+            path = self.path.split("?")[0]
+            if seen is not None:
+                seen.append(("POST", path, payload))
+            if post_responses and path in post_responses:
+                out = post_responses[path]
+            else:
+                out = {"success": True}
+                if payload.get("action") == "harness.append_message_at_cursor":
+                    out["id"] = "PA"
             body = json.dumps(out).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -368,7 +376,10 @@ def _run_case_against_stub(case_ops, responses):
             self.wfile.write(body)
 
         def do_GET(self):
-            spec = responses.get(self.path.split("?")[0], {})
+            path = self.path.split("?")[0]
+            if seen is not None:
+                seen.append(("GET", path, None))
+            spec = responses.get(path, {})
             if "raw" in spec:
                 body = spec["raw"]
                 ctype = spec.get("ctype", "application/octet-stream")
@@ -395,10 +406,15 @@ def _run_case_against_stub(case_ops, responses):
             "capabilities": {"opaqueCursor": True, "mediaById": True},
             "_base_url": "http://127.0.0.1:" + str(port),
         }
-        ctx = inv.Ctx(fixture=fx, case={"id": "stub", "ops": case_ops})
+        for key, value in (fixture_over or {}).items():
+            fx[key] = value
+        case = {"id": "stub", "ops": case_ops}
+        if requires:
+            case["requires"] = requires
+        ctx = inv.Ctx(fixture=fx, case=case)
         for slot, spec in fx["slots"].items():
             ctx.variables["slot:" + slot] = spec["id"]
-        return runner_mod.run_case({"id": "stub", "ops": case_ops}, ctx, None), ctx
+        return runner_mod.run_case(case, ctx, None), ctx
     finally:
         srv.shutdown()
 
@@ -536,24 +552,125 @@ check("op1 fail 后 op2 SkipCase 不覆盖失败状态（fail 优先）",
 print("")
 print("注册表条数：" + str(len(inv.names())))
 print("定向媒体导出")
-b = {"success": True, "mediaId": "digest.png", "fileName": "digest.png", "mediaUrl": "/api/v1/media/digest.png"}
+# 句柄要拼进路径段，所以契约限定它是 URL 安全 token；展示名 fileName 可以是平台原名或空串。
+b = {"success": True, "mediaId": "digest-abc123.png", "fileName": "语音.png",
+     "mediaUrl": "/api/v1/media/digest-abc123.png"}
 c = ctx_with(b)
 c.fixture["endpoints"] = {"media": "/api/v1/media/{id}"}
 c.status = 200
-check("定向句柄合法", run("targeted_media_export_handle", c) is None)
-for key, wrong in [("mediaId", " "), ("mediaId", ".."), ("mediaId", "../bad"), ("fileName", "other.png"), ("mediaUrl", "https://example.test/media?token=secret"), ("success", False)]:
+check("定向句柄合法（展示名允许平台原名）", run("targeted_media_export_handle", c) is None)
+c.body = {**b, "fileName": ""}
+check("展示名为空串也合法", run("targeted_media_export_handle", c) is None)
+for wrong in ("", " ", "  .  ", "..", "../bad", "语音.png", "a b.png", "%2e%2e%2fetc", "a&b", "a/b"):
+    c.body = {**b, "mediaId": wrong}
+    check("拒绝不合规句柄 " + repr(wrong), run("targeted_media_export_handle", c) is not None)
+for key, wrong in [("fileName", 7), ("success", False), ("mediaId", None),
+                   ("mediaUrl", "https://example.test/media/x?token=secret"),
+                   ("mediaUrl", "/api/v1/media/other.png")]:
     c.body = {**b, key: wrong}
-    check("定向导出拒绝错误 " + key, run("targeted_media_export_handle", c) is not None)
+    check("拒绝 " + key + "=" + repr(wrong), run("targeted_media_export_handle", c) is not None)
+c.body = b
+c.status = 500
+check("非 200 被拦并报出实际状态", "500" in (run("targeted_media_export_handle", c) or ""))
+c.status = 200
+for tpl in ("api/v1/media/{id}", "//api/v1/media/{id}", "/api/v1/media/x"):
+    c.fixture["endpoints"] = {"media": tpl}
+    check("拒绝不可用的 media 模板 " + repr(tpl), run("targeted_media_export_handle", c) is not None)
+c.fixture["endpoints"] = {"media": "/api/v1/media/{id}"}
+
+print("JSON body 变量解析")
 import run as runner
-c.variables = {"target": {"timestamp": 123, "sender": "sample"}}
-check("JSON body 保留整数类型", runner.resolve_body({"timestamp": "{target.timestamp}"}, c) == {"timestamp": 123})
-check("JSON body 解析嵌套字段", runner.resolve_body(["{target.sender}"], c) == ["sample"])
-for missing in ("{missing}", "{target.absent}"):
+c.variables = {"target": {"timestamp": 123, "sender": "sample", "a-b": 456}}
+check("完整引用保留整数类型", runner.resolve_body({"timestamp": "{target.timestamp}"}, c) == {"timestamp": 123})
+check("完整引用保留嵌套对象", runner.resolve_body({"t": "{target}"}, c) == {"t": {"timestamp": 123, "sender": "sample", "a-b": 456}})
+check("内嵌引用按字符串替换", runner.resolve_body({"id": "id-{target.sender}"}, c) == {"id": "id-sample"})
+check("变量名允许连字符（与 schema 的 varRef 一致）", runner.resolve_body({"n": "{target.a-b}"}, c) == {"n": 456})
+check("列表逐项解析", runner.resolve_body(["{target.sender}"], c) == ["sample"])
+for bad in ("{missing}", "{target.absent}"):
     try:
-        runner.resolve_body(missing, c)
-        check("JSON body 拒绝缺失变量", False)
-    except runner.CaseError:
-        check("JSON body 拒绝缺失变量", True)
+        runner.resolve_body(bad, c)
+        check("拒绝缺失变量 " + bad, False)
+    except runner.CaseError as exc:
+        check("拒绝缺失变量 " + bad + " 且报出变量名", bad.strip("{}") in str(exc))
+c.variables["target"]["none"] = None
+try:
+    runner.resolve_body("{target.none}", c)
+    check("拒绝 None 值", False)
+except runner.CaseError as exc:
+    check("拒绝 None 值且报出变量名", "target.none" in str(exc))
+
+c.variables["slot:handle"] = "digest-abc123.png"
+for tpl in ("/media/a b/{id}", "/media/语音/{id}"):
+    c.fixture["endpoints"] = {"media": tpl}
+    try:
+        runner.endpoint_path("{endpoints.media}", c, "handle")
+        check("坏模板按环境错误报出 " + repr(tpl), False)
+    except runner.SetupError:
+        check("坏模板按环境错误报出 " + repr(tpl), True)
+
+print("定向导出用例端到端（桩）")
+media_case = json.loads((Path(__file__).resolve().parents[1] / "cases/lifecycle/targeted-media-export-fetch.json")
+                        .read_text(encoding="utf-8"))
+media_fixture = {
+    "endpoints": {"media": "/media/{id}", "media_export": "/media/export", "harness": "/__harness"},
+    "slots": {"targeted_media": {"id": "@chatroom", "expect": {
+        "platformMessageId": "m-1", "sender": "wxid_a", "timestamp": 1700000000}}},
+    "capabilities": {"mediaExportByMessage": True, "mediaById": True},
+}
+seen = []
+res, _ctx = _run_case_against_stub(
+    media_case["ops"],
+    {"/media/digest-abc123.png": {"raw": b"\x89PNG\r\n\x1a\npayload", "ctype": "image/png"}},
+    fixture_over=media_fixture,
+    post_responses={"/media/export": {"success": True, "mediaId": "digest-abc123.png",
+                                      "fileName": "语音.png", "mediaUrl": "/media/digest-abc123.png"}},
+    seen=seen,
+    requires=media_case["requires"],
+)
+check("定向导出用例通过（原因 " + repr(res.reasons) + "）", res.status == "pass")
+payload = next((pl for (m, _p, pl) in seen if m == "POST"), {})
+check("只 POST 导出端点一次", [p for (m, p, _pl) in seen if m == "POST"] == ["/media/export"])
+check("请求体保留整数 timestamp", isinstance(payload.get("timestamp"), int)
+      and payload.get("timestamp") == 1700000000)
+check("请求体带齐三个身份字段", payload.get("talker") == "@chatroom"
+      and payload.get("platformMessageId") == "m-1" and payload.get("sender") == "wxid_a")
+check("取字节用返回的句柄", [p for (m, p, _pl) in seen if m == "GET"] == ["/media/digest-abc123.png"])
+
+# 只有导出能力、没有按句柄取字节的夹具必须整条跳过，而不是跑到第二步才红。
+res, _ctx = _run_case_against_stub(
+    media_case["ops"], {}, fixture_over={**media_fixture, "capabilities": {"mediaExportByMessage": True}},
+    post_responses={}, seen=[], requires=media_case["requires"],
+)
+check("缺 mediaById 时整条用例跳过", res.status == "skip")
+
+# 非合规句柄：断言层报错、路径段被编码、第二步照跑（执行器不崩）。
+seen = []
+res, _ctx = _run_case_against_stub(
+    media_case["ops"],
+    {},
+    fixture_over=media_fixture,
+    post_responses={"/media/export": {"success": True, "mediaId": "语音.png",
+                                      "fileName": "语音.png", "mediaUrl": "/media/语音.png"}},
+    seen=seen,
+    requires=media_case["requires"],
+)
+check("非合规句柄被判负", res.status == "fail"
+      and any("targeted_media_export_handle" in reason for reason in res.reasons))
+check("非合规句柄仍编码成合法 URL 再发", [p for (m, p, _pl) in seen if m == "GET"]
+      == ["/media/%E8%AF%AD%E9%9F%B3.png"])
+check("第二步照跑并各自报错", any("media_fetch_bytes_nonempty" in reason for reason in res.reasons))
+
+# 孤立代理字符：`quote` 会抛 UnicodeEncodeError，必须落在用例层而不是崩掉执行器。
+seen = []
+res, _ctx = _run_case_against_stub(
+    media_case["ops"], {}, fixture_over=media_fixture,
+    post_responses={"/media/export": {"success": True, "mediaId": "\ud800",
+                                      "fileName": "", "mediaUrl": "/media/x"}},
+    seen=seen, requires=media_case["requires"],
+)
+check("孤立代理字符不崩执行器", res.status == "fail"
+      and any("不是合法 URL" in reason for reason in res.reasons))
+check("孤立代理字符的取字节请求没有发出", not [p for (m, p, _pl) in seen if m == "GET"])
 
 if FAILS:
     print("失败 " + str(len(FAILS)) + " 项：" + "；".join(FAILS))

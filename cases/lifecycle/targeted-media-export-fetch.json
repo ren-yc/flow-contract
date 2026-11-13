@@ -3,11 +3,12 @@
   "group": "lifecycle",
   "requires": [
     "capability:mediaExportByMessage",
+    "capability:mediaById",
     "endpoint:media_export",
     "endpoint:media",
     "slot:targeted_media"
   ],
-  "note": "按完整消息身份定向导出并取实际句柄，媒体字节非空；不依赖默认消息页。",
+  "note": "按完整消息身份定向导出，再用返回的句柄取字节；不依赖默认消息页。第二步的 slot 指向本用例 save 出来的句柄，不是夹具槽位。",
   "ops": [
     {
       "req": {
@@ -21,7 +22,7 @@
         }
       },
       "save": {
-        "slot:targeted_media": "mediaId"
+        "slot:targeted_media_handle": "mediaId"
       },
       "assert": [
         "targeted_media_export_handle"
@@ -30,7 +31,7 @@
     {
       "req": {
         "GET": "{endpoints.media}",
-        "slot": "targeted_media",
+        "slot": "targeted_media_handle",
         "expect": "bytes"
       },
       "assert": [

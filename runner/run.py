@@ -48,7 +48,9 @@ if hasattr(sys.stdout, "reconfigure"):
 _ENDPOINT_TPL = re.compile(r"^\{endpoints\.([a-z0-9_-]+)\}$")
 # 变量字符集含 `:` —— 槽位 id 以 `slot:名字` 存进变量表（fixture 装载处），
 # 正则不放行冒号时它就引用不到，这与 resolve 的文档（「端点名与槽位名也走同一套变量表」）矛盾。
-_VAR = re.compile(r"\{([a-zA-Z0-9_.:]+)\}")
+# 连字符也必须放行：schema 的 varRef 允许它（`{slots.targeted-media.id}` 是合法写法）。
+# 两边字符集不一致时，schema 通过的写法会被**当成字面量原样发给服务端**，看起来像服务端的问题。
+_VAR = re.compile(r"\{([a-zA-Z0-9_.:-]+)\}")
 
 
 class SetupError(Exception):
@@ -86,7 +88,11 @@ def dig(obj, path: str):
 
 
 def resolve(text, ctx):
-    """把 {var.path} 换成实际值。端点名与槽位名也走同一套变量表。"""
+    """把 {var.path} 换成实际值。端点名与槽位名也走同一套变量表。
+
+    `{slots.<槽位>.<字段>}` 按字段取值；请求体里整串就是它时保留原始 JSON 类型，
+    而 `{slot:名字}` 只给 id 字符串。
+    """
     if not isinstance(text, str):
         return text
 
@@ -108,6 +114,18 @@ def resolve(text, ctx):
     return _VAR.sub(sub, text)
 
 
+# 路径段安全集：RFC 3986 的 pchar（unreserved 之外保留子分隔符与 `:`/`@`）。
+# 句柄是服务端给的，契约要求它是 URL 安全 token；这里仍按 pchar 编码一次——非合规实现
+# （空格、非 ASCII、`?`、`#`）会得到合法 URL 并让断言报出契约违例，而不是在 http.client
+# 里抛 UnicodeEncodeError / InvalidURL 把整套报告一起吞掉。保留 `@`、`:` 等是为了不改变
+# 既有会话 id（如 `...@chatroom`）的线上形态。
+_SEGMENT_SAFE = "!$&'()*+,;=:@-._~"
+
+
+def _url_segment(value) -> str:
+    return urllib.parse.quote("" if value is None else str(value), safe=_SEGMENT_SAFE)
+
+
 def endpoint_path(tpl: str, ctx, slot: str | None):
     m = _ENDPOINT_TPL.match(tpl)
     if not m:
@@ -117,10 +135,16 @@ def endpoint_path(tpl: str, ctx, slot: str | None):
     if name not in table:
         raise SetupError("夹具没有声明端点 " + repr(name))
     path = table[name]
+    # 模板是夹具写的：坏模板属「夹具或环境」错误（exit 2），不该和服务端给的坏句柄
+    # （用例级失败）混成同一类。空格与非 ASCII 会在 http.client 里抛 InvalidURL /
+    # UnicodeEncodeError，留到那里报就只能报成用例失败，看不出是夹具写错了。
+    if not path.startswith("/") or not path.isascii() or any(ord(c) < 33 for c in path):
+        raise SetupError("端点 " + name + " 的模板必须以 / 开头，且只用不含空白与控制字符的 ASCII，"
+                         "实际 " + repr(path))
     if "{id}" in path:
         if not slot:
             raise SetupError("端点 " + name + " 的路径含 {id}，但这一步没给 slot")
-        path = path.replace("{id}", str(ctx.variables.get("slot:" + slot, "")))
+        path = path.replace("{id}", _url_segment(ctx.variables.get("slot:" + slot, "")))
     # 注意：slot 在不含 {id} 的端点上（如 pull）是合法的——它经 `slot:名字` 变量
     # 参与查询参数（chatlab-messages-page 就这样用），不代表路径替换意图。
     # 「给了 slot 但路径无处可放」不能在这里判死；媒体句柄类的错绑由
@@ -140,9 +164,9 @@ def resolve_body(value, ctx):
             try:
                 result = dig(ctx.variables, match.group(1))
             except KeyError:
-                raise CaseError("JSON body 引用了未绑定的变量") from None
+                raise CaseError("JSON body 引用了未绑定的变量 {" + match.group(1) + "}") from None
             if result is None:
-                raise CaseError("JSON body 引用值缺失")
+                raise CaseError("JSON body 的变量 {" + match.group(1) + "} 值是 None")
             return result
         return resolve(value, ctx)
     return value
@@ -164,21 +188,25 @@ def request(ctx, op, token: str | None):
     if method is None:
         raise SetupError("req 缺方法键（GET/POST/…）：" + repr(req))
     slot = req.get("slot")
-    path = endpoint_path(req[method], ctx, slot)
-    query = {k: resolve(v, ctx) for k, v in (req.get("query") or {}).items()}
-    if token:
-        query.setdefault("access_token", token)
-    if query:
-        path = path + "?" + urllib.parse.urlencode(query)
 
     base = _split_base(ctx.fixture["_base_url"])
     conn = http.client.HTTPConnection(base.hostname, base.port or 80, timeout=30)
-    body = None
-    headers = {}
-    if "body" in req:
-        body = json.dumps(resolve_body(req["body"], ctx))
-        headers["Content-Type"] = "application/json"
     try:
+        # 路径与查询串的拼装必须在 try 里：句柄是服务端给的，`quote` 对孤立代理字符会抛
+        # UnicodeEncodeError，`http.client` 对空格会抛 InvalidURL。两者都不是
+        # SkipCase/CaseError，冒泡到 main 会把整套报告一起丢掉——转成用例级失败，
+        # 报告才能说清「是谁不合规」而不是「执行器崩了」。
+        path = endpoint_path(req[method], ctx, slot)
+        query = {k: resolve(v, ctx) for k, v in (req.get("query") or {}).items()}
+        if token:
+            query.setdefault("access_token", token)
+        if query:
+            path = path + "?" + urllib.parse.urlencode(query)
+        body = None
+        headers = {}
+        if "body" in req:
+            body = json.dumps(resolve_body(req["body"], ctx))
+            headers["Content-Type"] = "application/json"
         conn.request(method, path, body=body, headers=headers)
         resp = conn.getresponse()
         raw_bytes = resp.read()
@@ -186,6 +214,8 @@ def request(ctx, op, token: str | None):
         # 记录 Content-Type：字节断言用它区分「真的媒体字节」与「恰好也是字节的
         # JSON 错误信封」——没有它，一个 200 的 JSON 页也能让非空断言假通过。
         ctx.response_content_type = resp.getheader("Content-Type") or ""
+    except (http.client.InvalidURL, UnicodeEncodeError) as exc:
+        raise CaseError("请求路径不是合法 URL（夹具模板或句柄含无法编码的字符）：" + str(exc)) from None
     finally:
         conn.close()
     ctx.requests += 1
@@ -404,6 +434,10 @@ def _consume_misses(ctx, result):
 
 def run_case(case, ctx, token: str | None) -> rep.Result:
     result = rep.Result(case_id=case["id"], group=case.get("group", ""))
+    # 槽位表还要以 `{slots.<槽位>.<字段>}` 的形式可见：JSON body 需要保留原始类型
+    # （如整数 timestamp），而 `{slot:名字}` 只给出 id 字符串。放在这里而不是 main 的
+    # 装载循环，是为了让直接调用 run_case 的入口（selftest 的桩）同样能用。
+    ctx.variables.setdefault("slots", ctx.fixture.get("slots", {}))
     try:
         for need in case.get("requires", []):
             kind, _, name = need.partition(":")
@@ -719,9 +753,8 @@ def main(argv=None) -> int:
         ctx = inv.Ctx(fixture=fixture, case=case)
         for slot, spec in (fixture.get("slots") or {}).items():
             ctx.variables["slot:" + slot] = spec.get("id", "")
-        ctx.variables["slots"] = fixture.get("slots", {})
         # 执行期的 SetupError 在这里补上用例名再抛：否则顶层只报「loop_until 在 80 次内没有满足」
-        # 之类的话，**看不出是哪条用例**，而契约套件里有 33 条、其中多条用同一个不变量。
+        # 之类的话，**看不出是哪条用例**，而契约套件里多条用例共用同一个不变量。
         try:
             result = run_case(case, ctx, args.token or None)
         except SetupError as e:
