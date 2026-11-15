@@ -64,7 +64,7 @@
           },
           "expect": {
             "type": "object",
-            "description": "该槽位的期望；断言据此取上/下界，而不是硬编码数值。约定俗成的形状之一是定向导出槽位 targeted_media：id 为会话标识，expect 提供目标消息的 platformMessageId（字符串）、sender（字符串）与整数秒 timestamp——用例原样放进请求体，因此类型必须对。"
+            "description": "该槽位的期望；断言据此取上/下界，而不是硬编码数值。约定俗成的形状之一是定向导出槽位 targeted_media：id 为会话标识，expect 提供目标消息的 platformMessageId（字符串）、sender（字符串）与整数秒 timestamp——用例原样放进请求体，因此类型必须对。槽位 group_out_of_order 的 expect 提供 since（整数秒的窗口下界；必须落在会话内、且其后至少还有两行）与 messages（该窗口内的行数；必须大于引用它的用例的小页 limit，否则游标链一次就排空、测不到续页路径）。此外夹具必须让「时间更晚、行标识更小」的那一行是窗口内时间最大者——否则两段式与单水位实现在这些小页上可能凑巧等集。"
           }
         }
       }
@@ -85,7 +85,7 @@
         },
         "opaqueCursor": {
           "type": "boolean",
-          "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable）。"
+          "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable），且逐页回传游标的小页排空集合必须等于同窗口一次大 limit 的集合（cursor-window-drain-equals-single-page 与 cursor-drain-equals-full-out-of-order）。"
         },
         "cursorReset": {
           "type": "boolean",

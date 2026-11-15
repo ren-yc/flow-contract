@@ -619,6 +619,23 @@ def _cursor_progress_reaches_appended(ctx: Ctx) -> str | None:
     return None
 
 
+def _cursor_reason(ctx: Ctx, when: str) -> str | None:
+    """`sync.nextCursor` 的在场判据：缺失或为空即失败原因，正常返回 None。
+
+    进度游标在**每个**非终态页上都必须是可用的非空字符串——调用方只能靠它续页。
+    它与消息面 `page.nextCursor`（排空即 null）的约定相反：进度游标排空后仍在场，
+    否则客户端拿不到下一个增量请求的起点。两条不变量共用这一处判据，
+    免得「排空时在场」被放宽而「链上每页在场」还留着旧口径。
+    """
+    sync = _sync(ctx)
+    if not sync:
+        return f"{when}：响应里没有 sync 块：{ctx.body!r}"
+    v = sync.get("nextCursor")
+    if not isinstance(v, str) or not v:
+        return f"{when}：sync.nextCursor 应为非空字符串，实际 {v!r}"
+    return None
+
+
 @invariant(
     "opaque_cursor_presents_on_drain",
     "排空后 sync.nextCursor 仍是非空字符串（与消息面 page.nextCursor 排空为 null 的约定不同）"
@@ -627,10 +644,59 @@ def _opaque_cursor_on_drain(ctx: Ctx) -> str | None:
     # 进度游标与消息面的翻页游标语义不同：消息面排空即终结（null），
     # 进度游标要继续表达「下次增量从哪里起」——排空后必须仍在场，
     # 否则客户端拿不到下一个增量请求的起点。实现者把两个约定平移错了会在这里被拦。
-    sync = _sync(ctx)
-    v = sync.get("nextCursor")
-    if not isinstance(v, str) or not v:
-        return f"排空后 sync.nextCursor 应为非空字符串（进度游标不终结），实际 {v!r}"
+    return _cursor_reason(ctx, "排空后（进度游标不终结）")
+
+
+@invariant(
+    "cursor_chain_carries_a_cursor_on_every_page",
+    "链上每一页都回传非空 sync.nextCursor（在循环体内断言，因此逐页生效）"
+)
+def _cursor_chain_carries_a_cursor(ctx: Ctx) -> str | None:
+    # 与 `opaque_cursor_presents_on_drain` 同一条判据、不同作用域：那条只在链尾求值一次，
+    # 拦不住「中途某页不给游标、最后一页才给」——而中途缺一页，调用方就断链了。
+    # 这条写进 `loop_until` 的断言里，每轮求值一次。
+    return _cursor_reason(ctx, "链上每页")
+
+
+@invariant(
+    "cursor_chain_drain_equals_baseline",
+    "逐页回传游标排空后的 id 并集恰等于同窗口单页大 limit 的集合；且链上至少两页有内容"
+)
+def _cursor_chain_equals_baseline(ctx: Ctx) -> str | None:
+    # 为什么不能复用 `drained_set_equals_full_set`：它把 ctx.pages 里的**每一页**并起来，
+    # 而大 limit 的基准页自己就在 pages 里——并集必然包含基准，于是「少行」永远看不出来。
+    # 这条只并**基准页之后**的页，基准页必须是第一个请求（下面显式核对，不靠约定）。
+    full_ids = ctx.variables.get("full_ids")
+    if not isinstance(full_ids, list):
+        return "缺少基准：先用一次大 limit 取全量并 save 成 full_ids（值写 $ids）"
+    if not full_ids:
+        return ("基准为空：夹具必须让本条用例的窗口非空（带 since 的用例要给一个落在会话内、"
+                "且其后还有行的下界），否则「游标排空」与「游标被忽略」无法区分")
+    if len(ctx.pages) < 2:
+        return "还没有链页：基准页之后至少要有一页经游标取回"
+    baseline, chain = ctx.pages[0], ctx.pages[1:]
+    if set(baseline.get("ids", [])) != set(full_ids):
+        return ("第一个请求不是基准页（大 limit 全量）：用例的基准请求必须排在最前，"
+                "否则本断言只能拿链页与链页自己比")
+    # 一次就排空是最需要挡掉的假绿：v2 在「页 1 大 limit + 一页装下全部」时也能等集，
+    # 而它根本没走续页。要求链上**至少两页有内容**，即小页真的翻过页。
+    nonempty = sum(1 for page in chain if page.get("n", 0) > 0)
+    if nonempty < 2:
+        return (f"链上只有 {nonempty} 页有内容：小页 limit 必须小于窗口行数，"
+                "让游标链至少翻两页（否则测不到续页路径）")
+    drained = [mid for page in chain for mid in page.get("ids", [])]
+    if len(drained) != len(set(drained)):
+        seen: set = set()
+        dup: list = []
+        for mid in drained:
+            if mid in seen and mid not in dup:
+                dup.append(mid)
+            seen.add(mid)
+        return f"跨页重复：{dup[:3]}（游标非排他）"
+    got, want = set(drained), set(full_ids)
+    if got != want:
+        return (f"游标链排空后与单页集合不一致：多 {len(got - want)} 条、少 {len(want - got)} 条"
+                f"（多的是不该交付的行，少的是被续页跨过去的行）")
     return None
 
 

@@ -203,6 +203,60 @@ check("排空后 nextCursor 为 null 被拦（消息面约定不可平移）",
 c = ctx_with(envelope(sync={"hasMore": False, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": ""}))
 check("排空后 nextCursor 为空串被拦", run("opaque_cursor_presents_on_drain", c) is not None)
 
+print("B 组补：链上每页都带游标（逐页求值）")
+c = ctx_with(envelope(sync={"hasMore": True, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": "opaque-2"}))
+check("链中页 nextCursor 非空时通过", run("cursor_chain_carries_a_cursor_on_every_page", c) is None)
+c = ctx_with(envelope())
+check("链中页缺 nextCursor 被拦", run("cursor_chain_carries_a_cursor_on_every_page", c) is not None)
+c = ctx_with(envelope(sync={"hasMore": True, "nextSince": 1790000001, "nextOffset": 0, "nextCursor": ""}))
+check("链中页 nextCursor 为空串被拦", run("cursor_chain_carries_a_cursor_on_every_page", c) is not None)
+
+print("B 组补：游标链排空 = 同窗口单页集合")
+
+
+def _page(ids):
+    return {"first_ts": 1790000001, "last_ts": 1790000001, "ids": list(ids), "n": len(ids)}
+
+
+def _chain(pages, full):
+    c = ctx_with(envelope(), variables={"full_ids": list(full)})
+    c.pages = pages
+    return c
+
+
+check("链页并集等于基准、且至少两页有内容时通过",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A", "B", "C"]), _page(["A", "B"]), _page(["C"])], ["A", "B", "C"])) is None)
+check("少行被拦（续页跨过了未交付的行）",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A", "B", "C"]), _page(["A", "B"])], ["A", "B", "C"])) is not None)
+check("多行被拦（窗口外的回溯行经续页漏进来）",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A", "B"]), _page(["A", "B"]), _page(["X"])], ["A", "B"])) is not None)
+check("重复被拦（游标非排他，但并集仍等于基准）",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A", "B"]), _page(["A", "A"]), _page(["B"])], ["A", "B"])) is not None)
+check("链上一次就排空被拦（测不到续页路径的假绿）",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A", "B"]), _page(["A", "B"]), _page([])], ["A", "B"])) is not None)
+check("只有一页链页被拦（基准页不算链页）",
+      run("cursor_chain_drain_equals_baseline", _chain([_page(["A", "B"])], ["A", "B"])) is not None)
+check("第一步不是基准页被拦（不靠约定、显式核对）",
+      run("cursor_chain_drain_equals_baseline",
+          _chain([_page(["A"]), _page(["B"]), _page(["A", "B"])], ["A", "B"])) is not None)
+check("缺基准被拦", run("cursor_chain_drain_equals_baseline", ctx_with(envelope())) is not None)
+c = ctx_with(envelope())
+c.pages = [_page(["A"]), _page(["A"])]
+check("基准为空被拦（游标生效与游标被忽略不可区分）",
+      run("cursor_chain_drain_equals_baseline", c) is not None)
+
+# 这条不变量存在的理由：`drained_set_equals_full_set` 把**每一页**并起来，而大 limit 的
+# 基准页自己就在页序列里——并集必然包含基准，于是「少行」永远看不出来。两组输入相同，
+# 旧判据通过、新判据报错，差异就是这条用例要堵的洞。
+_weak = _chain([_page(["A", "B", "C"]), _page(["A", "B"])], ["A", "B", "C"])
+check("旧判据在基准页混进页序列时假通过", run("drained_set_equals_full_set", _weak) is None)
+check("新判据在同样输入下报出少行", run("cursor_chain_drain_equals_baseline", _weak) is not None)
+
 print("媒体句柄取字节")
 c = ctx_with({})
 c.status = 200
