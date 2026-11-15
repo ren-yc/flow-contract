@@ -1,0 +1,66 @@
+{
+  "id": "cursor-window-drain-equals-single-page",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "slot:group_out_of_order"
+  ],
+  "note": "带 since 的窗口里，逐页回传游标排空后的集合等于同窗口一次大 limit 的集合：既不能多出窗口外的回溯历史行，也不能少掉「时间更晚、入库更早」的行",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "since": "{slots.group_out_of_order.expect.since}",
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "full_ids": "$ids"
+      },
+      "assert": [
+        "drained_cursor_terminal_state"
+      ]
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "since": "{slots.group_out_of_order.expect.since}",
+          "limit": "2"
+        }
+      },
+      "save": {
+        "cursor": "sync.nextCursor"
+      },
+      "assert": [
+        "cursor_chain_carries_a_cursor_on_every_page"
+      ]
+    },
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 40,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "cursor": "{cursor}",
+          "limit": "2"
+        }
+      },
+      "save": {
+        "cursor": "sync.nextCursor"
+      },
+      "assert": [
+        "cursor_chain_carries_a_cursor_on_every_page"
+      ]
+    },
+    {
+      "assert": [
+        "cursor_chain_drain_equals_baseline"
+      ]
+    }
+  ]
+}

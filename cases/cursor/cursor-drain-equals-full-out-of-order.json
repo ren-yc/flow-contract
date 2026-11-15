@@ -1,0 +1,64 @@
+{
+  "id": "cursor-drain-equals-full-out-of-order",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "slot:group_out_of_order"
+  ],
+  "note": "无窗口时，逐页回传游标排空后的集合等于一次大 limit 的全集：入库序与时间序分叉时，续页按入库序过滤不得跨过「时间更晚、入库更早」的行",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "limit": "5000"
+        }
+      },
+      "save": {
+        "full_ids": "$ids"
+      },
+      "assert": [
+        "drained_cursor_terminal_state"
+      ]
+    },
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "limit": "3"
+        }
+      },
+      "save": {
+        "cursor": "sync.nextCursor"
+      },
+      "assert": [
+        "cursor_chain_carries_a_cursor_on_every_page"
+      ]
+    },
+    {
+      "loop_until": "sync.hasMore == false",
+      "max": 40,
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "cursor": "{cursor}",
+          "limit": "3"
+        }
+      },
+      "save": {
+        "cursor": "sync.nextCursor"
+      },
+      "assert": [
+        "cursor_chain_carries_a_cursor_on_every_page"
+      ]
+    },
+    {
+      "assert": [
+        "cursor_chain_drain_equals_baseline"
+      ]
+    }
+  ]
+}
