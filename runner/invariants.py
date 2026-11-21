@@ -700,6 +700,74 @@ def _cursor_chain_equals_baseline(ctx: Ctx) -> str | None:
     return None
 
 
+def _case_windows(ctx: Ctx) -> list:
+    """该用例引用到的槽位里，夹具声明的窗口下界。
+
+    按 `requires` 的 `slot:` 项逐个取，而不是扫描全部槽位：同一份夹具可以给多个槽位
+    配 `expect`，按名字读才不会把 A 的窗口算到 B 的响应上。
+    """
+    out: list = []
+    for need in ctx.case.get("requires") or []:
+        if not isinstance(need, str) or not need.startswith("slot:"):
+            continue
+        name = need.split(":", 1)[1]
+        spec = (ctx.fixture.get("slots") or {}).get(name) or {}
+        expect = spec.get("expect") or {}
+        if "since" in expect:
+            out.append(expect["since"])
+    return out
+
+
+def _sync_block(ctx: Ctx) -> dict | None:
+    """响应的 sync 块；形状不对时返回 None（由调用方给出具体原因）。"""
+    body = ctx.body
+    sync = body.get("sync") if isinstance(body, dict) else None
+    return sync if isinstance(sync, dict) else None
+
+
+@invariant(
+    "sync_since_matches_window_fixture",
+    "带窗口的拉取页回显 sync.since，且值等于夹具给该槽位的窗口下界"
+)
+def _sync_since_matches_window(ctx: Ctx) -> str | None:
+    # 回显的意义是「这一页属于哪个窗口」自证，而不是让调用方记住自己发过什么：
+    # 游标第二段不应用窗口，会带出早于下界的回溯行，从交付的行反推只会得到错的下界。
+    windows = _case_windows(ctx)
+    if len(windows) > 1:
+        return f"用例引用的槽位里有 {len(windows)} 个窗口下界，无法判定该回显哪一个"
+    if not windows:
+        return "这条用例引用的槽位没有配置 expect.since：无窗口那一档请用 sync_since_is_null_without_window"
+    sync = _sync_block(ctx)
+    if sync is None:
+        return "响应里没有 sync 块，读不到 sync.since"
+    if "since" not in sync:
+        return ("sync.since 字段缺席：本版起每一页都要回显窗口下界——"
+                "缺键与显式 null 不是一回事，客户端据前者无法区分「旧服务端」与「没有下界」")
+    got = sync["since"]
+    if got != windows[0]:
+        return f"sync.since 应回显窗口下界 {windows[0]}，实际 {got!r}"
+    return None
+
+
+@invariant(
+    "sync_since_is_null_without_window",
+    "无窗口的拉取页仍带 sync.since 键，值为 null（缺席与 null 不可互换）"
+)
+def _sync_since_is_null_without_window(ctx: Ctx) -> str | None:
+    windows = _case_windows(ctx)
+    if windows:
+        return "这条用例的槽位配了窗口下界：带窗口那一档请用 sync_since_matches_window_fixture"
+    sync = _sync_block(ctx)
+    if sync is None:
+        return "响应里没有 sync 块，读不到 sync.since"
+    if "since" not in sync:
+        return ("sync.since 字段缺席：无窗口时也要给键、值为 null——"
+                "缺键让调用方分不清「旧服务端」与「这一页没有下界」")
+    if sync["since"] is not None:
+        return f"无窗口时 sync.since 应为 null，实际 {sync['since']!r}"
+    return None
+
+
 @invariant(
     "media_fetch_bytes_nonempty",
     "按 mediaId 句柄取字节：HTTP 200、非 JSON Content-Type、响应体非空"

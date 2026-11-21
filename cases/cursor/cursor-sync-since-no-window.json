@@ -1,0 +1,23 @@
+{
+  "id": "cursor-sync-since-no-window",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "slot:group_with_messages"
+  ],
+  "note": "不给 since 的首页照样带 sync.since 键，值为 null：缺键与 null 不是一回事",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_with_messages",
+        "query": {
+          "limit": "2"
+        }
+      },
+      "assert": [
+        "sync_since_is_null_without_window"
+      ]
+    }
+  ]
+}

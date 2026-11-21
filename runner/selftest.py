@@ -257,6 +257,50 @@ _weak = _chain([_page(["A", "B", "C"]), _page(["A", "B"])], ["A", "B", "C"])
 check("旧判据在基准页混进页序列时假通过", run("drained_set_equals_full_set", _weak) is None)
 check("新判据在同样输入下报出少行", run("cursor_chain_drain_equals_baseline", _weak) is not None)
 
+print("B 组补：sync.since 回显窗口下界")
+
+_WIN_SLOT = {"group_out_of_order": {"id": "G1", "expect": {"since": 1790000000, "messages": 5}}}
+_PLAIN_SLOT = {"group_with_messages": {"id": "G2"}}
+
+
+def _pull_ctx(sync, slots, needs):
+    f = {"platform": "wechat", "capabilities": {"sse": True, "roles": False}, "slots": slots}
+    return inv.Ctx(fixture=f, case={"requires": needs}, body=envelope(sync=sync))
+
+
+_WIN_SYNC = {"hasMore": True, "nextSince": 1790000005, "nextOffset": 0, "nextCursor": "c1",
+             "since": 1790000000}
+_PLAIN_SYNC = {"hasMore": False, "nextSince": 1790000005, "nextOffset": 0, "since": None}
+
+check("带窗口回显下界时通过",
+      run("sync_since_matches_window_fixture",
+          _pull_ctx(dict(_WIN_SYNC), _WIN_SLOT, ["slot:group_out_of_order"])) is None)
+check("回显错值被拦",
+      run("sync_since_matches_window_fixture",
+          _pull_ctx({**_WIN_SYNC, "since": 1790000001}, _WIN_SLOT, ["slot:group_out_of_order"]))
+      is not None)
+check("有窗口却给 null 被拦",
+      run("sync_since_matches_window_fixture",
+          _pull_ctx({**_WIN_SYNC, "since": None}, _WIN_SLOT, ["slot:group_out_of_order"])) is not None)
+check("缺键被拦（缺键 ≠ null）",
+      run("sync_since_matches_window_fixture",
+          _pull_ctx({k: v for k, v in _WIN_SYNC.items() if k != "since"},
+                    _WIN_SLOT, ["slot:group_out_of_order"])) is not None)
+check("槽位没配窗口时被拦（用错不变量）",
+      run("sync_since_matches_window_fixture",
+          _pull_ctx(dict(_PLAIN_SYNC), _PLAIN_SLOT, ["slot:group_with_messages"])) is not None)
+check("无窗口给 null 时通过",
+      run("sync_since_is_null_without_window",
+          _pull_ctx(dict(_PLAIN_SYNC), _PLAIN_SLOT, ["slot:group_with_messages"])) is None)
+check("无窗口缺键被拦",
+      run("sync_since_is_null_without_window",
+          _pull_ctx({k: v for k, v in _PLAIN_SYNC.items() if k != "since"},
+                    _PLAIN_SLOT, ["slot:group_with_messages"])) is not None)
+check("无窗口却回了数字被拦",
+      run("sync_since_is_null_without_window",
+          _pull_ctx({**_PLAIN_SYNC, "since": 1790000000},
+                    _PLAIN_SLOT, ["slot:group_with_messages"])) is not None)
+
 print("媒体句柄取字节")
 c = ctx_with({})
 c.status = 200

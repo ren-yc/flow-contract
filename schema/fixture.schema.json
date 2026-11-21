@@ -85,7 +85,7 @@
         },
         "opaqueCursor": {
           "type": "boolean",
-          "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable），且逐页回传游标的小页排空集合必须等于同窗口一次大 limit 的集合（cursor-window-drain-equals-single-page 与 cursor-drain-equals-full-out-of-order）。"
+          "description": "拉取面支持不透明进度游标：sync.nextCursor + 查询参数 cursor。声明为 true 的夹具，排空后追加的行必须可经游标续拉到达（cursor-boundary-append-reachable），且逐页回传游标的小页排空集合必须等于同窗口一次大 limit 的集合（cursor-window-drain-equals-single-page 与 cursor-drain-equals-full-out-of-order）。自契约 v0.13.0 起还要逐页回显窗口下界 sync.since：带窗口时为请求里的 since 值，无窗口时为 null（键必须在场），由 cursor-sync-since-window 与 cursor-sync-since-no-window 钉住；槽位 expect.since 因此必须是整数秒。"
         },
         "cursorReset": {
           "type": "boolean",

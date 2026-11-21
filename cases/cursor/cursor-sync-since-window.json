@@ -1,0 +1,24 @@
+{
+  "id": "cursor-sync-since-window",
+  "group": "cursor",
+  "requires": [
+    "capability:opaqueCursor",
+    "slot:group_out_of_order"
+  ],
+  "note": "带 since 的首页回显 sync.since，值等于请求里那个窗口下界；有窗口时不得给 null",
+  "ops": [
+    {
+      "req": {
+        "GET": "{endpoints.pull}",
+        "slot": "group_out_of_order",
+        "query": {
+          "since": "{slots.group_out_of_order.expect.since}",
+          "limit": "2"
+        }
+      },
+      "assert": [
+        "sync_since_matches_window_fixture"
+      ]
+    }
+  ]
+}
